@@ -14,6 +14,7 @@
     stations: [],
     projects: [],
     tables: {},           // 合併後對照表
+    storedTables: {},     // IndexedDB 裡的自訂表原始列（含 base/baseVersion）
     activeProjectCode: null,
     importId: null,       // 目前草稿在匯入紀錄中的 id
     editingTable: null    // 對照表編輯中的分頁
@@ -50,6 +51,7 @@
         });
       })
       .then(function () {
+        buildDatalists();
         bindNav(); bindUpload(); bindActions();
         renderProjectSelect(); renderStationsView(); renderProjectsView();
         renderTablesView(); renderHistoryView(); updateStatusBar();
@@ -74,12 +76,42 @@
     return C.storage.getAll("projects").then(function (rows) { state.projects = rows || []; });
   }
   function loadTables() {
-    var merged = {};
+    var merged = {}, stored = {};
     return Promise.all(CFG.tableNames.map(function (name) {
       return C.storage.get("tables", CFG.id + "." + name).then(function (row) {
+        if (row) stored[name] = row;
         merged[name] = row ? row.data : JSON.parse(JSON.stringify(DB.water[name]));
       });
-    })).then(function () { state.tables = merged; });
+    })).then(function () {
+      state.tables = merged;
+      state.storedTables = stored;
+    });
+  }
+
+  /* 自訂表存檔時記錄的 baseVersion 比內建預設舊 → 需提示合併 */
+  function outdatedTableNames() {
+    return CFG.tableNames.filter(function (name) {
+      var row = state.storedTables[name];
+      return row && (row.baseVersion || 0) < DB.water.tablesVersion;
+    });
+  }
+
+  /* ================= 官方代碼表下拉（datalist：可搜尋、仍可手動輸入） ================= */
+  function buildDatalists() {
+    function make(id, table, sep) {
+      if (document.getElementById(id)) return;
+      var dl = document.createElement("datalist");
+      dl.id = id;
+      Object.keys(table).forEach(function (code) {
+        var o = document.createElement("option");
+        o.value = code;
+        o.label = code + sep + table[code];
+        dl.appendChild(o);
+      });
+      document.body.appendChild(dl);
+    }
+    make("unit-datalist", DB.unitCodeTable, "－");
+    make("agency-datalist", DB.agencyCodeTable, "－");
   }
 
   /* ================= 導覽 ================= */
@@ -248,9 +280,10 @@
     }
     var rows = state.records.reduce(function (s, r) { return s + r.items.length; }, 0);
     if (state.missing.length) {
-      info.textContent = "共 " + rows + " 列 — 尚有 " + state.missing.length + " 個欄位待補（紅色儲存格）";
+      info.textContent = "共 " + rows + " 列 — 尚有 " + state.missing.length +
+        " 個欄位待補（紅色儲存格；點「匯出」可檢視清單並選擇以空白輸出）";
       info.className = "bad";
-      btn.disabled = true;
+      btn.disabled = !state.activeProjectCode;   // 有缺漏仍可點，開啟匯出對話框
     } else if (!state.activeProjectCode) {
       info.textContent = "共 " + rows + " 列 — 請先選擇案場";
       info.className = "bad";
@@ -300,6 +333,9 @@
         editor.value = cur || "";
       } else {
         editor.value = (cur === null || cur === undefined) ? "" : String(cur);
+        // 官方代碼欄位掛可搜尋下拉（datalist），仍可手動輸入
+        if (col.edit === "agency") editor.setAttribute("list", "agency-datalist");
+        if (col.key === "unitCode") editor.setAttribute("list", "unit-datalist");
       }
     }
 
@@ -371,6 +407,21 @@
   /* ================= 匯出 / 空白範本 / 清除 ================= */
   function bindActions() {
     $("#btn-export").addEventListener("click", doExport);
+    // 匯出對話框（缺漏時）
+    $("#export-allow-blank").addEventListener("change", function () {
+      $("#btn-export-confirm").disabled = !this.checked;
+      C.storage.setSetting("exportAllowBlank", this.checked);   // 記住選擇，下次沿用
+    });
+    $("#btn-export-cancel").addEventListener("click", closeExportModal);
+    $("#export-modal").addEventListener("click", function (e) {
+      if (e.target === this) closeExportModal();
+    });
+    $("#btn-export-confirm").addEventListener("click", function () {
+      var project = state.projects.find(function (p) { return p.code === state.activeProjectCode; });
+      if (!project) { toast("請先選擇案場", true); return; }
+      closeExportModal();
+      performExport(project);
+    });
     // 空白範本：官方五類範本選單
     $("#btn-blank").addEventListener("click", function (e) {
       e.stopPropagation();
@@ -429,7 +480,40 @@
   function doExport() {
     var project = state.projects.find(function (p) { return p.code === state.activeProjectCode; });
     if (!project) { toast("請先在「案場管理」建立並選擇案場", true); return; }
-    if (state.missing.length) { toast("還有欄位未補完", true); return; }
+    if (!state.records.length) return;
+    if (state.missing.length) { openExportModal(); return; }  // 有缺漏 → 對話框確認
+    performExport(project);
+  }
+
+  /* ---- 匯出對話框：缺漏清單＋「缺漏欄位自動以空白輸出」 ---- */
+  function openExportModal() {
+    var list = $("#export-missing-list");
+    list.innerHTML = "";
+    var t = el("table", "mgmt");
+    t.innerHTML = "<tr><th>測站 / 項目</th><th>缺漏欄位</th><th>備註</th></tr>";
+    state.missing.forEach(function (m) {
+      var col = CFG.columns.find(function (c) { return c.key === m.key; });
+      var tr = el("tr");
+      tr.appendChild(el("td", null, m.message));
+      tr.appendChild(el("td", null, m.label));
+      var td3 = el("td");
+      if (col && col.official) {
+        td3.appendChild(el("span", "req-badge", "申報必填，空白可能被系統退件"));
+      }
+      tr.appendChild(td3);
+      t.appendChild(tr);
+    });
+    list.appendChild(t);
+    C.storage.getSetting("exportAllowBlank").then(function (v) {
+      var cb = $("#export-allow-blank");
+      cb.checked = !!v;   // 預設不勾選；記住上次選擇
+      $("#btn-export-confirm").disabled = !cb.checked;
+      $("#export-modal").classList.remove("hidden");
+    });
+  }
+  function closeExportModal() { $("#export-modal").classList.add("hidden"); }
+
+  function performExport(project) {
     try {
       var bytes = C.exporter.buildWorkbook(CFG, state.records, project);
       C.exporter.download(bytes, CFG.exportFileName(project));
@@ -437,13 +521,16 @@
       toast("匯出失敗：" + e.message, true);
       return;
     }
-    // 匯出成功 → 更新測站記憶（座標、上次時間迄、別名）
+    // 匯出成功 → 更新測站記憶（座標、上次時間迄、別名）；缺漏(null)不覆蓋既有值
     var puts = state.records.map(function (rec) {
       var name = rec.f.site.v;
+      if (name === null || name === undefined || String(name).trim() === "") return Promise.resolve();
       var existing = state.stations.find(function (s) { return s.name === name; });
       var st = existing || { name: name, aliases: [] };
-      st.coordSys = rec.f.coordSys.v; st.x = rec.f.x.v; st.y = rec.f.y.v;
-      st.lastEndTime = rec.f.timeEnd.v;
+      if (rec.f.coordSys.v != null) st.coordSys = rec.f.coordSys.v;
+      if (rec.f.x.v != null) st.x = rec.f.x.v;
+      if (rec.f.y.v != null) st.y = rec.f.y.v;
+      if (rec.f.timeEnd.v != null) st.lastEndTime = rec.f.timeEnd.v;
       st.aliases = st.aliases || [];
       if (rec.stationRaw && rec.stationRaw !== name && st.aliases.indexOf(rec.stationRaw) < 0) {
         st.aliases.push(rec.stationRaw);
@@ -453,7 +540,9 @@
     Promise.all(puts).then(reloadStations).then(renderStationsView);
     saveDraft("exported");
     var rows = state.records.reduce(function (s, r) { return s + r.items.length; }, 0);
-    toast("已匯出 " + rows + " 列（含監測點基本資料工作表）");
+    var blanks = state.missing.length;
+    toast("已匯出 " + rows + " 列（含監測點基本資料工作表）" +
+      (blanks ? "，其中 " + blanks + " 個缺漏欄位以空白輸出" : ""));
   }
 
   /* ================= 匯入紀錄 ================= */
@@ -718,22 +807,88 @@
       tabs.appendChild(b);
     });
     renderTableEditor(state.editingTable);
+    renderTableUpdateBanner();
+  }
+
+  /* ---- 內建預設更新提示：合併 或 維持現狀（絕不靜默覆蓋） ---- */
+  function renderTableUpdateBanner() {
+    var old = $("#table-update-banner");
+    if (old) old.remove();
+    var names = outdatedTableNames();
+    if (!names.length) return;
+    C.storage.getSetting("tablesVerDismissed." + CFG.id).then(function (dismissed) {
+      if ((dismissed || 0) >= DB.water.tablesVersion) return;
+      if ($("#table-update-banner")) return;
+      var banner = el("div", "update-banner");
+      banner.id = "table-update-banner";
+      banner.appendChild(el("strong", null, "內建預設對照表已更新（v" + DB.water.tablesVersion + "）"));
+      banner.appendChild(el("div", "update-banner-desc",
+        "受影響：" + names.map(function (n) { return TABLE_META[n].label; }).join("、") +
+        "。「合併」＝保留你自訂與修改過的列，只帶入新增的預設列；「維持現狀」＝完全不動你的表。"));
+      var actions = el("div", "form-actions left");
+      var bMerge = el("button", "btn primary", "合併");
+      bMerge.addEventListener("click", function () {
+        Promise.all(names.map(function (name) {
+          var row = state.storedTables[name];
+          var defaults = DB.water[name];
+          var base = row.base || {};
+          var data = JSON.parse(JSON.stringify(row.data));
+          var added = [];
+          Object.keys(defaults).forEach(function (k) {
+            if (!(k in base) && !(k in data)) { data[k] = defaults[k]; added.push(k); }
+          });
+          return C.storage.put("tables", {
+            name: CFG.id + "." + name, data: data,
+            base: JSON.parse(JSON.stringify(defaults)),
+            baseVersion: DB.water.tablesVersion
+          }).then(function () { return added.length; });
+        })).then(function (counts) {
+          var total = counts.reduce(function (s, n) { return s + n; }, 0);
+          return loadTables().then(function () {
+            renderTablesView();
+            toast("合併完成，帶入 " + total + " 筆新增預設列（你的自訂列全數保留）");
+          });
+        });
+      });
+      var bKeep = el("button", "btn", "維持現狀");
+      bKeep.addEventListener("click", function () {
+        C.storage.setSetting("tablesVerDismissed." + CFG.id, DB.water.tablesVersion).then(function () {
+          banner.remove();
+          toast("已維持現狀（此版本不再提醒）");
+        });
+      });
+      actions.appendChild(bMerge); actions.appendChild(bKeep);
+      banner.appendChild(actions);
+      var editor = $("#table-editor");
+      editor.parentNode.insertBefore(banner, $("#table-tabs"));
+    });
   }
   function renderTableEditor(name) {
     var meta = TABLE_META[name], box = $("#table-editor");
     box.innerHTML = "";
-    box.appendChild(el("p", "kv-note",
-      name === "methodOverrides"
-        ? "在此表中的項目，匯出時一律填指定方法（目前依歷次申報慣例：溶氧→NIEA W422）。刪除該列即改為照 raw data 去版次輸出。"
-        : "解析時查不到的值會列入警告並要求手動補填。"));
+    var note = el("p", "kv-note");
+    if (name === "unitCodes") {
+      note.textContent = "此表只列 raw data 會出現的單位；完整官方代碼表請見";
+      var link = el("a", "inline-link", "規範查閱");
+      link.href = "#";
+      link.addEventListener("click", function (e) { e.preventDefault(); showView("rules"); });
+      note.appendChild(link);
+      note.appendChild(document.createTextNode("。代碼欄可直接輸入，或從下拉（代碼－單位名稱）挑選。"));
+    } else if (name === "methodOverrides") {
+      note.textContent = "在此表中的項目，匯出時一律填指定方法（目前依歷次申報慣例：溶氧→NIEA W422）。刪除該列即改為照 raw data 去版次輸出。";
+    } else {
+      note.textContent = "解析時查不到的值會列入警告並要求手動補填。";
+    }
+    box.appendChild(note);
     var t = el("table", "mgmt");
     t.innerHTML = "<tr><th>" + escHtml(meta.kh) + "</th><th>" + escHtml(meta.vh) + "</th><th></th></tr>";
     var data = state.tables[name];
-    Object.keys(data).forEach(function (k) { t.appendChild(kvRow(t, k, data[k])); });
+    var listId = (name === "unitCodes") ? "unit-datalist" : null;
+    Object.keys(data).forEach(function (k) { t.appendChild(kvRow(t, k, data[k], listId)); });
     box.appendChild(t);
     var actions = el("div", "form-actions");
     var bAdd = el("button", "btn", "＋ 新增一列");
-    bAdd.addEventListener("click", function () { t.appendChild(kvRow(t, "", "")); });
+    bAdd.addEventListener("click", function () { t.appendChild(kvRow(t, "", "", listId)); });
     var bReset = el("button", "btn danger", "還原預設");
     bReset.addEventListener("click", function () {
       if (!confirm("將「" + meta.label + "」還原為出廠預設？")) return;
@@ -760,17 +915,22 @@
         }
       });
       if (bad) { toast("有列的值空白或格式錯誤", true); return; }
-      C.storage.put("tables", { name: CFG.id + "." + name, data: obj })
+      C.storage.put("tables", {
+        name: CFG.id + "." + name, data: obj,
+        base: JSON.parse(JSON.stringify(DB.water[name])),   // 記住存檔當下的內建預設，供日後合併判斷
+        baseVersion: DB.water.tablesVersion
+      })
         .then(loadTables)
         .then(function () { renderTablesView(); toast("已儲存（下次解析生效）"); });
     });
     [bAdd, bReset, bSave].forEach(function (b) { actions.appendChild(b); });
     box.appendChild(actions);
   }
-  function kvRow(t, k, v) {
+  function kvRow(t, k, v, valueListId) {
     var tr = el("tr");
     var td1 = el("td"), i1 = el("input"); i1.value = k; td1.appendChild(i1);
     var td2 = el("td"), i2 = el("input"); i2.value = String(v); td2.appendChild(i2);
+    if (valueListId) i2.setAttribute("list", valueListId);
     var td3 = el("td"), bDel = el("button", "btn small danger", "刪除列");
     bDel.addEventListener("click", function () { tr.remove(); });
     td3.appendChild(bDel);

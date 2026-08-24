@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yang-analyze web — 環境監測數據分析</title>
-<link rel="stylesheet" href="css/main.css?v=2">
+<link rel="stylesheet" href="css/main.css?v=3">
 </head>
 <body>
 <div id="app">
@@ -246,23 +246,40 @@
   </main>
 </div>
 
+<!-- 匯出確認對話框（有缺漏欄位時） -->
+<div id="export-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>匯出確認 — 尚有缺漏欄位</h3>
+    <p class="modal-desc">以下欄位尚未填寫（可先「取消」回預覽表點紅色儲存格補齊）：</p>
+    <div id="export-missing-list" class="modal-list"></div>
+    <label class="chk-line">
+      <input type="checkbox" id="export-allow-blank"> 缺漏欄位自動以空白輸出
+    </label>
+    <p class="note">不勾選則維持擋下匯出；勾選後缺漏處輸出空白儲存格（勾選狀態會記住）。</p>
+    <div class="form-actions">
+      <button class="btn" id="btn-export-cancel">取消</button>
+      <button class="btn primary" id="btn-export-confirm" disabled>匯出</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <!-- 函式庫（本地載入，無 CDN 依賴） -->
-<script src="lib/xlsx.full.min.js?v=2"></script>
+<script src="lib/xlsx.full.min.js?v=3"></script>
 <!-- 對照表資料庫 -->
-<script src="js/db/water_db.js?v=2"></script>
-<script src="js/db/code_tables.js?v=2"></script>
+<script src="js/db/water_db.js?v=3"></script>
+<script src="js/db/code_tables.js?v=3"></script>
 <!-- 共用引擎 -->
-<script src="js/core/xlsxwriter.js?v=2"></script>
-<script src="js/core/reader.js?v=2"></script>
-<script src="js/core/parser.js?v=2"></script>
-<script src="js/core/validator.js?v=2"></script>
-<script src="js/core/exporter.js?v=2"></script>
-<script src="js/core/storage.js?v=2"></script>
+<script src="js/core/xlsxwriter.js?v=3"></script>
+<script src="js/core/reader.js?v=3"></script>
+<script src="js/core/parser.js?v=3"></script>
+<script src="js/core/validator.js?v=3"></script>
+<script src="js/core/exporter.js?v=3"></script>
+<script src="js/core/storage.js?v=3"></script>
 <!-- 模組設定檔 -->
-<script src="js/configs/water.js?v=2"></script>
+<script src="js/configs/water.js?v=3"></script>
 <!-- 介面 -->
-<script src="js/app.js?v=2"></script>
+<script src="js/app.js?v=3"></script>
 </body>
 </html>

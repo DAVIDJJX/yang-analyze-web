@@ -225,5 +225,36 @@ table.mgmt { border-collapse: collapse; width: 100%; font-size: .85rem; }
 #toast.show { opacity: .96; }
 #toast.error { background: var(--c-danger); }
 
+/* ---------------- 匯出確認對話框 ---------------- */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(18, 30, 46, .45);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: var(--c-panel); border-radius: 10px; border: 1px solid var(--c-border);
+  box-shadow: 0 14px 44px rgba(10, 22, 40, .3);
+  width: min(680px, 92vw); max-height: 84vh; overflow: auto; padding: 20px 24px;
+}
+.modal h3 { margin: 0 0 8px; }
+.modal-desc { color: var(--c-sub); font-size: .88rem; margin: 0 0 10px; }
+.modal-list { max-height: 42vh; overflow: auto; margin-bottom: 12px; }
+.chk-line { display: flex; align-items: center; gap: 8px; font-size: .95rem; font-weight: 600; }
+.chk-line input { accent-color: var(--c-accent); width: 16px; height: 16px; }
+.req-badge {
+  display: inline-block; font-size: .72rem; color: var(--c-danger);
+  background: var(--c-danger-bg); border: 1px solid var(--c-danger);
+  border-radius: 10px; padding: 1px 8px; white-space: nowrap;
+}
+
+/* ---------------- 內建預設更新提示 ---------------- */
+.update-banner {
+  background: var(--c-warn-bg); border: 1px solid var(--c-warn-border);
+  border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; font-size: .9rem;
+}
+.update-banner-desc { color: var(--c-sub); font-size: .84rem; margin-top: 6px; }
+.update-banner .form-actions { margin-top: 10px; }
+.inline-link { color: var(--c-accent); margin: 0 2px; }
+
 .empty-note { color: var(--c-sub); text-align: center; padding: 30px 0; font-size: .9rem; }
 code.k { background: #eef2f8; border-radius: 4px; padding: 1px 6px; font-size: .82em; }
