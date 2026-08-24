@@ -201,6 +201,83 @@
     });
   }
 
+  /* ----------------------------------------------------------------------
+   * byBlock 比對模式（setup.compare === "byBlock"）：
+   * 區塊鍵（setup.blockKeyCols，如 站×日期）先分組，區塊內再以列鍵
+   * （setup.rowKeyCols，如 特性×時段）對齊逐欄比對。
+   * 適用一站多日、預期檔列順序不定的情況（如噪音）。
+   * 預期檔獨有的區塊 → 既知偏差（他月檔案的資料）；
+   * 匯出獨有的區塊 → 站名在 knownDeviations.ignoreOutputBlockSites 才算偏差
+   * （raw 檔內的它月殘留工作表），否則 FAIL。
+   * ---------------------------------------------------------------------- */
+  function rowsPlain(ws) {
+    var rng = XLSX.utils.decode_range(ws["!ref"]);
+    var list = [];
+    for (var r = 1; r <= rng.e.r; r++) {
+      var cells = [], any = false;
+      for (var c = 0; c <= rng.e.c; c++) {
+        var cell = ws[XLSX.utils.encode_cell({ r: r, c: c })];
+        var v = cell ? cell.v : undefined;
+        if (typeof v === "string" && v.trim() === "") v = undefined;
+        if (v !== undefined) any = true;
+        cells.push(v);
+      }
+      if (any) list.push(cells);
+    }
+    return list;
+  }
+  function compareByBlocks(wsExp, wsGot, setup, diffs, devs, stats) {
+    var dv = setup.knownDeviations || {};
+    var bk = setup.blockKeyCols, rk = setup.rowKeyCols;
+    function keyOf(cells, cols) { return cols.map(function (c) { return String(cells[c]); }).join(" ⁄ "); }
+    function group(list) {
+      var m = {};
+      list.forEach(function (cells) {
+        var k = keyOf(cells, bk);
+        (m[k] = m[k] || []).push(cells);
+      });
+      return m;
+    }
+    var expMap = group(rowsPlain(wsExp)), gotMap = group(rowsPlain(wsGot));
+
+    Object.keys(expMap).forEach(function (k) {
+      if (!gotMap[k]) devs.push([k, "-", "預期檔獨有區塊（他月檔案資料，本檔無對應 raw 工作表）", expMap[k].length + " 列"]);
+    });
+    Object.keys(gotMap).forEach(function (k) {
+      var gRows = gotMap[k], eRows = expMap[k];
+      if (!eRows) {
+        var site = gRows[0][bk[0]];
+        if ((dv.ignoreOutputBlockSites || []).indexOf(String(site)) >= 0) {
+          devs.push([k, "-", "匯出獨有區塊（raw 檔內它月殘留工作表）", gRows.length + " 列"]);
+        } else {
+          diffs.push([k, "(區塊)", "預期檔無此區塊", gRows.length + " 列"]);
+        }
+        return;
+      }
+      gRows.forEach(function (g) {
+        var rKey = keyOf(g, rk);
+        var e = eRows.find(function (x) { return keyOf(x, rk) === rKey; });
+        if (!e) { diffs.push([k, rKey, "預期檔無此列", "-"]); return; }
+        for (var c = 0; c < Math.max(g.length, e.length); c++) {
+          var ve = e[c], vg = g[c];
+          stats.compared++;
+          var same;
+          if (ve === undefined && vg === undefined) same = true;
+          else if (typeof ve === "number" && typeof vg === "number") same = Math.abs(ve - vg) < 1e-9;
+          else same = (ve === vg);
+          if (same) { if (ve !== undefined) stats.valued++; }
+          else diffs.push([k + " / " + rKey, colLetter(c), String(ve), String(vg)]);
+        }
+      });
+      eRows.forEach(function (e) {
+        var rKey = keyOf(e, rk);
+        if (!gRows.find(function (x) { return keyOf(x, rk) === rKey; })) {
+          diffs.push([k, rKey, "-", "匯出缺此列"]);
+        }
+      });
+    });
+  }
+
   /* ---------------- 單一黃金樣本 ---------------- */
   function runCase(kase, bufs, setup, expectedBuf) {
     var config = CONFIGS[kase.module];
@@ -247,14 +324,37 @@
 
       var diffs = [], devs = [], stats = { compared: 0, valued: 0, fmtDiffs: [] };
       var sheetsOk = JSON.stringify(wbExp.SheetNames) === JSON.stringify(wbGot.SheetNames);
-      if (setup.compare === "byStation") {
-        // 基本資料表照位置比；檢測項目表逐測站對齊比（預期檔列順序不定）
+      if (setup.compare === "byStation" || setup.compare === "byBlock") {
+        // 基本資料表照位置比；檢測項目表逐測站/逐區塊對齊比（預期檔列順序不定）
         var basicName = wbExp.SheetNames[0], itemName = wbExp.SheetNames[1];
         if (wbGot.Sheets[basicName]) {
           compareSheets(wbExp.Sheets[basicName], wbGot.Sheets[basicName], basicName, true, diffs, stats, setup.checkFormats);
         }
         if (wbGot.Sheets[itemName]) {
-          compareByStation(wbExp.Sheets[itemName], wbGot.Sheets[itemName], setup, diffs, devs, stats);
+          if (setup.compare === "byBlock") {
+            compareByBlocks(wbExp.Sheets[itemName], wbGot.Sheets[itemName], setup, diffs, devs, stats);
+          } else {
+            compareByStation(wbExp.Sheets[itemName], wbGot.Sheets[itemName], setup, diffs, devs, stats);
+          }
+        }
+        // 基本資料表白名單：預期檔漏掉的欄（如手工檔少了「備註」標題欄）
+        var bm = (setup.knownDeviations || {}).basicMissing || [];
+        if (bm.length) {
+          for (var di = diffs.length - 1; di >= 0; di--) {
+            var d = diffs[di];
+            if (d[0] !== basicName) continue;
+            if (bm.indexOf(String(d[1]).charAt(0)) >= 0 && d[2] === "undefined") {
+              devs.push([basicName, d[1], "預期檔漏此欄（匯出補齊為 " + d[3] + "）", "-"]);
+              diffs.splice(di, 1);
+            } else if (d[1] === "(範圍)") {
+              // 範圍差異僅因預期檔缺白名單欄（如 A1:G12 vs A1:H12，差在 H 欄）→ 視為同一偏差
+              var lastGot = String(d[3]).replace(/\d+$/, "").slice(-1);
+              if (bm.indexOf(lastGot) >= 0) {
+                devs.push([basicName, "(範圍)", "預期檔少了 " + bm.join("/") + " 欄（" + d[2] + " vs " + d[3] + "）", "-"]);
+                diffs.splice(di, 1);
+              }
+            }
+          }
         }
       } else {
         wbExp.SheetNames.forEach(function (sn, i) {

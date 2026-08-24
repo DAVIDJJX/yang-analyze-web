@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yang-analyze web — 環境監測數據分析</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="css/main.css?v=4">
+<link rel="stylesheet" href="css/main.css?v=5">
 </head>
 <body>
 <div id="app">
@@ -18,7 +18,7 @@
       <div class="side-title">分析種類</div>
       <label class="chk"><input type="checkbox" id="mod-water" checked> 水質</label>
       <label class="chk"><input type="checkbox" id="mod-air" checked> 空氣品質</label>
-      <label class="chk disabled"><input type="checkbox" disabled> 噪音 <span class="tag">開發中</span></label>
+      <label class="chk"><input type="checkbox" id="mod-noise" checked> 噪音</label>
     </div>
 
     <nav>
@@ -30,7 +30,7 @@
       <button class="nav-btn" data-view="rules">規範查閱</button>
       <button class="nav-btn" data-view="backup">設定/備份</button>
     </nav>
-    <div class="side-foot">水質＋空氣品質模組<br>純靜態網頁，資料只存在你的瀏覽器</div>
+    <div class="side-foot">水質＋空氣＋噪音模組<br>純靜態網頁，資料只存在你的瀏覽器</div>
   </aside>
 
   <!-- ================= 工作區 ================= -->
@@ -44,8 +44,8 @@
           <span>案場</span>
           <select id="active-project"></select>
         </div>
-        <p class="desc">上傳檢驗室的「水質檢測報告」或「空氣品質檢測報告」Excel（.xls / .xlsx / .xlsm，可多檔，
-          自動辨識報告種類），解析後於下方預覽表補齊紅色缺漏欄位，即可匯出環境部申報格式。</p>
+        <p class="desc">上傳檢驗室的「水質」「空氣品質」「噪音/振動」檢測報告 Excel（.xls / .xlsx / .xlsm，
+          可多檔混放，自動辨識報告種類），解析後於下方預覽表補齊紅色缺漏欄位，即可匯出環境部申報格式。</p>
       </header>
 
       <div id="dropzone">
@@ -270,22 +270,24 @@
 <div id="toast"></div>
 
 <!-- 函式庫（本地載入，無 CDN 依賴） -->
-<script src="lib/xlsx.full.min.js?v=4"></script>
+<script src="lib/xlsx.full.min.js?v=5"></script>
 <!-- 對照表資料庫 -->
-<script src="js/db/water_db.js?v=4"></script>
-<script src="js/db/air_db.js?v=4"></script>
-<script src="js/db/code_tables.js?v=4"></script>
+<script src="js/db/water_db.js?v=5"></script>
+<script src="js/db/air_db.js?v=5"></script>
+<script src="js/db/noise_db.js?v=5"></script>
+<script src="js/db/code_tables.js?v=5"></script>
 <!-- 共用引擎 -->
-<script src="js/core/xlsxwriter.js?v=4"></script>
-<script src="js/core/reader.js?v=4"></script>
-<script src="js/core/parser.js?v=4"></script>
-<script src="js/core/validator.js?v=4"></script>
-<script src="js/core/exporter.js?v=4"></script>
-<script src="js/core/storage.js?v=4"></script>
+<script src="js/core/xlsxwriter.js?v=5"></script>
+<script src="js/core/reader.js?v=5"></script>
+<script src="js/core/parser.js?v=5"></script>
+<script src="js/core/validator.js?v=5"></script>
+<script src="js/core/exporter.js?v=5"></script>
+<script src="js/core/storage.js?v=5"></script>
 <!-- 模組設定檔 -->
-<script src="js/configs/water.js?v=4"></script>
-<script src="js/configs/air.js?v=4"></script>
+<script src="js/configs/water.js?v=5"></script>
+<script src="js/configs/air.js?v=5"></script>
+<script src="js/configs/noise.js?v=5"></script>
 <!-- 介面 -->
-<script src="js/app.js?v=4"></script>
+<script src="js/app.js?v=5"></script>
 </body>
 </html>

@@ -6,6 +6,10 @@
  * 資料模型：每個可編輯欄位都是 {v, src}，src = 'parsed' | 'manual'
  *   - parsed  : 由 raw data 解析取得
  *   - manual  : 手動輸入（含測站記憶自動帶入者，via:'memory' 標記來源）
+ *
+ * 模組設定檔可選定義 postProcess(records, warnings, ctx)：
+ * 在該模組全部工作表解析完後呼叫一次，供跨紀錄補值
+ * （如噪音模組：振動表無座標/許可證號，需由同站同日的噪音表帶入）。
  * ========================================================================= */
 (function () {
   "use strict";
@@ -33,6 +37,10 @@
       if (s === "") return v;
       var n = Number(s);
       return Number.isNaN(n) ? v : n;
+    },
+    /** 四捨五入至 1 位小數（噪音/振動申報值慣例）；非數字回傳 null */
+    round1: function (v) {
+      return (typeof v === "number") ? Math.round(v * 10) / 10 : null;
     },
     /** '6.0×104' → 60000（科學記號上標流失的還原）；不符合格式回傳 null */
     parseSciText: function (v) {
@@ -64,77 +72,80 @@
     return null;
   }
 
-  /* ----------------------------------------------------------------------
-   * parseFiles(fileModels, config, ctx) → {records, warnings}
-   *   fileModels : YangCore.reader.readFile 的結果陣列（依匯入順序）
-   *   config     : 模組設定檔（YangConfigs.water 等）
-   *   ctx        : { stations: [...], tables: {...合併後對照表} }
-   *
-   * record = {
-   *   uid, module, fileName, sheetName, stationRaw,
-   *   f:     { key: {v, src, via?} }        // 測站層級欄位
-   *   items: [ { key: {v, src}, ... } ]     // 檢測項目層級欄位
-   *   hints: { lastEndTime }                // 供 UI 顯示的參考資訊
-   * }
-   * ---------------------------------------------------------------------- */
+  /* ---------------- 單一工作表 → record（共用內部流程） ---------------- */
   var uidSeq = 1;
+  function parseOneSheet(fm, sn, config, ctx, records, warnings) {
+    var acc = fm.sheet(sn);
+    var parsed = config.parseSheet(acc, helpers, ctx.tables);
+    parsed.warnings.forEach(function (w) {
+      warnings.push(fm.fileName + " [" + sn + "]：" + w);
+    });
+
+    var rec = {
+      uid: "r" + (uidSeq++), module: config.id,
+      fileName: fm.fileName, sheetName: sn,
+      stationRaw: parsed.stationRaw,
+      f: {}, items: parsed.items, hints: {}
+    };
+    Object.keys(parsed.fields).forEach(function (k) {
+      rec.f[k] = { v: parsed.fields[k], src: "parsed" };
+    });
+
+    // 手動欄位：raw data 一定沒有，初始為空、標記 manual
+    config.manualFields.forEach(function (k) {
+      if (!(k in rec.f)) rec.f[k] = { v: null, src: "manual" };
+    });
+
+    // 測站記憶：同名（或別名）測站自動帶入座標與申報名稱（不覆蓋已解析的值）
+    var st = findStation(ctx.stations || [], parsed.stationRaw);
+    if (st) {
+      rec.f[config.stationField] = { v: st.name, src: "parsed" };
+      ["coordSys", "x", "y"].forEach(function (k) {
+        var sv = (k === "coordSys") ? st.coordSys : st[k];
+        if (rec.f[k] && (rec.f[k].v === null || rec.f[k].v === undefined) && sv != null) {
+          rec.f[k] = { v: sv, src: "manual", via: "memory" };
+        }
+      });
+      rec.hints.lastEndTime = st.lastEndTime || null;
+    } else {
+      rec.f[config.stationField] = { v: parsed.stationRaw, src: "parsed" };
+      var needCoords = ["coordSys", "x", "y"].some(function (k) {
+        return rec.f[k] && (rec.f[k].v === null || rec.f[k].v === undefined);
+      });
+      if (needCoords) {
+        warnings.push(fm.fileName + " [" + sn + "]：測站「" + parsed.stationRaw +
+          "」不在測站記憶中，請補座標（將自動存入測站管理）");
+      }
+    }
+    records.push(rec);
+  }
+
+  /* ----------------------------------------------------------------------
+   * parseFiles(fileModels, config, ctx) → {records, warnings}（單模組）
+   * ---------------------------------------------------------------------- */
   function parseFiles(fileModels, config, ctx) {
     var records = [], warnings = [];
     fileModels.forEach(function (fm) {
       fm.sheetNames.forEach(function (sn) {
-        var acc = fm.sheet(sn);
-        if (!config.detectSheet(acc)) {
+        if (!config.detectSheet(fm.sheet(sn))) {
           warnings.push(fm.fileName + " [" + sn + "]：非" + config.label + "報告格式，已略過");
           return;
         }
-        var parsed = config.parseSheet(acc, helpers, ctx.tables);
-        parsed.warnings.forEach(function (w) {
-          warnings.push(fm.fileName + " [" + sn + "]：" + w);
-        });
-
-        var rec = {
-          uid: "r" + (uidSeq++), module: config.id,
-          fileName: fm.fileName, sheetName: sn,
-          stationRaw: parsed.stationRaw,
-          f: {}, items: parsed.items, hints: {}
-        };
-        Object.keys(parsed.fields).forEach(function (k) {
-          rec.f[k] = { v: parsed.fields[k], src: "parsed" };
-        });
-
-        // 手動欄位：raw data 一定沒有，初始為空、標記 manual
-        config.manualFields.forEach(function (k) {
-          if (!(k in rec.f)) rec.f[k] = { v: null, src: "manual" };
-        });
-
-        // 測站記憶：同名（或別名）測站自動帶入座標與申報名稱
-        var st = findStation(ctx.stations || [], parsed.stationRaw);
-        if (st) {
-          rec.f[config.stationField] = { v: st.name, src: "parsed" };
-          if (st.coordSys != null) rec.f.coordSys = { v: st.coordSys, src: "manual", via: "memory" };
-          if (st.x != null) rec.f.x = { v: st.x, src: "manual", via: "memory" };
-          if (st.y != null) rec.f.y = { v: st.y, src: "manual", via: "memory" };
-          rec.hints.lastEndTime = st.lastEndTime || null;
-        } else {
-          rec.f[config.stationField] = { v: parsed.stationRaw, src: "parsed" };
-          warnings.push(fm.fileName + " [" + sn + "]：測站「" + parsed.stationRaw +
-            "」不在測站記憶中，請補座標（將自動存入測站管理）");
-        }
-        records.push(rec);
+        parseOneSheet(fm, sn, config, ctx, records, warnings);
       });
     });
+    if (config.postProcess) config.postProcess(records, warnings, ctx);
     return { records: records, warnings: warnings };
   }
 
   /* ----------------------------------------------------------------------
    * parseFilesMulti(fileModels, jobs) → {records, warnings}
    *   jobs: [{config, ctx}] — 每張工作表由第一個 detectSheet 命中的模組解析；
-   *   全部未命中才列警告。單模組行為與 parseFiles 相同（parseFiles 保留不動）。
+   *   全部未命中才列警告。各模組的 postProcess 於該模組全部紀錄解析完後呼叫。
    * ---------------------------------------------------------------------- */
   function parseFilesMulti(fileModels, jobs) {
     var records = [], warnings = [];
     fileModels.forEach(function (fm) {
-      var oneFile = { fileName: fm.fileName, sheetNames: null, sheet: fm.sheet };
       fm.sheetNames.forEach(function (sn) {
         var acc = fm.sheet(sn);
         var job = null;
@@ -145,11 +156,14 @@
           warnings.push(fm.fileName + " [" + sn + "]：無法辨識的工作表格式，已略過");
           return;
         }
-        oneFile.sheetNames = [sn];
-        var res = parseFiles([oneFile], job.config, job.ctx);
-        records = records.concat(res.records);
-        warnings = warnings.concat(res.warnings);
+        parseOneSheet(fm, sn, job.config, job.ctx, records, warnings);
       });
+    });
+    jobs.forEach(function (job) {
+      if (job.config.postProcess) {
+        job.config.postProcess(records.filter(function (r) { return r.module === job.config.id; }),
+          warnings, job.ctx);
+      }
     });
     return { records: records, warnings: warnings };
   }

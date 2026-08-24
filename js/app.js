@@ -5,13 +5,14 @@
 (function () {
   "use strict";
   var C = window.YangCore, DB = window.YangDB;
-  var MODULE_IDS = ["water", "air"];                       // 已啟用的分析種類（噪音待開發）
+  var MODULE_IDS = ["water", "air", "noise"];              // 已啟用的分析種類
   function cfgOf(mid) { return window.YangConfigs[mid]; }
   function cfgOfRec(rec) { return cfgOf(rec.module); }
   function enabledModules() {
     var list = [];
     if ($("#mod-water").checked) list.push("water");
     if ($("#mod-air").checked) list.push("air");
+    if ($("#mod-noise").checked) list.push("noise");
     return list;
   }
 
@@ -356,10 +357,11 @@
         editor.appendChild(new Option(code + "：" + DB.water.coordSystems[code], code));
       });
       if (cur !== null && cur !== undefined) editor.value = String(cur);
-    } else if (col.edit === "category" || col.edit === "aircategory") {
+    } else if (col.edit === "category" || col.edit === "aircategory" || col.edit === "noisecategory") {
       editor = el("select");
       editor.appendChild(new Option("— 請選 —", ""));
-      var catList = (col.edit === "aircategory") ? DB.air.categories : DB.water.categories;
+      var catList = (col.edit === "aircategory") ? DB.air.categories
+        : (col.edit === "noisecategory") ? DB.noise.categories : DB.water.categories;
       catList.forEach(function (c) { editor.appendChild(new Option(c, c)); });
       if (cur) editor.value = cur;
     } else {
@@ -852,7 +854,8 @@
     "water.itemNameMap": { label: "測項名稱對照", kh: "報告項目名稱", vh: "申報項目名稱", numeric: false },
     "water.methodOverrides": { label: "檢測方法覆寫", kh: "項目名稱", vh: "強制填寫的方法", numeric: false },
     "air.unitMap": { label: "測項 → 單位代碼", kh: "監測項目", vh: "環境部單位代碼", numeric: true, list: "unit-datalist" },
-    "air.methodMap": { label: "測項 → 檢測方法", kh: "監測項目", vh: "申報檢測方法", numeric: false }
+    "air.methodMap": { label: "測項 → 檢測方法", kh: "監測項目", vh: "申報檢測方法", numeric: false },
+    "noise.constMap": { label: "申報常數", kh: "項目", vh: "申報填寫值", numeric: false }
   };
   function allTableTabs() {
     var out = [];

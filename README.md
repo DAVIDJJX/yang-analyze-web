@@ -2,8 +2,8 @@
 
 環境監測 raw data → 環評申報報表 轉換工具（純靜態網頁，無後端、無資料上傳，
 所有資料只存在使用者瀏覽器本機）。
-目前模組：**水質**＋**空氣品質**（噪音開發中）。
-共用引擎＋模組設定檔架構：`js/core/` 通用，`js/configs/water.js`、`js/configs/air.js` 各管解析與輸出規則。
+目前模組：**水質**＋**空氣品質**＋**噪音/振動**。
+共用引擎＋模組設定檔架構：`js/core/` 通用，`js/configs/{water,air,noise}.js` 各管解析與輸出規則。
 
 > **線上版**：https://davidjjx.github.io/yang-analyze-web/ （GitHub Pages）
 
@@ -51,8 +51,10 @@ js/core/              共用引擎（通用，不含水質專屬邏輯）
   storage.js            IndexedDB＋JSON 備份/還原
 js/configs/water.js   水質設定檔（解析規則＋21 欄輸出規格）
 js/configs/air.js     空氣設定檔（24hr 連續監測報告解析＋23 欄輸出規格）
+js/configs/noise.js   噪音設定檔（N 噪音表＋V 振動表解析＋21 欄輸出；振動由同站同日噪音表配對補值）
 js/db/water_db.js     水質對照表預設值＋示範種子資料
 js/db/air_db.js       空氣對照表預設值（測項→單位代碼／檢測方法、儲存格位置計畫）
+js/db/noise_db.js     噪音對照表預設值（申報常數：管制標準、頻率範圍）
 js/db/code_tables.js  官方代碼表全收錄（單位 1–161、檢測機構；規範查閱頁可搜尋）
 templates/            官方空白範本五類（水質/空氣/噪音/地質/生態，接「下載空白範本」）
 docs/                 官方代碼表 PDF＋模組開發規格（air/noise spec、水質辭典核對報告）
@@ -71,6 +73,8 @@ test_data/            測試資料（真實 raw data／成品／setup；.gitigno
 | 水質 | 日期/時間格式、字型/欄寬（openpyxl 交叉驗證） | PASS |
 | 空氣 | 5 測站×14 測項 → 70 列，逐測站比對 1706 格 | **0 筆白名單外差異** |
 | 空氣 | 預期檔手工不一致（詳 test_data/air/setup.json 白名單） | 36 筆列為既知偏差 |
+| 噪音 | N/V 表×12 站日 → 60 列（噪音日/晚/夜＋振動日/夜），區塊比對 | **0 筆白名單外差異** |
+| 噪音 | 預期檔含他月資料與殘留工作表（詳 test_data/noise/setup.json） | 18 筆列為既知偏差 |
 | 共通 | 解析工具單元測試 11 項 | PASS |
 
 測試框架（`tests/`）為通用程式、隨 repo 公開；**真實監測數據全部放 `test_data/`**
