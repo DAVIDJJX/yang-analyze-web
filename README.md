@@ -43,7 +43,11 @@ js/core/              共用引擎（通用，不含水質專屬邏輯）
   storage.js            IndexedDB＋JSON 備份/還原
 js/configs/water.js   水質設定檔（解析規則＋21 欄輸出規格）
 js/db/water_db.js     對照表預設值＋示範種子資料
-tests/                驗收測試（僅本機，不隨網站公開──內含真實監測數據）
+js/db/code_tables.js  官方代碼表全收錄（單位 1–161、檢測機構；規範查閱頁可搜尋）
+templates/            官方空白範本五類（水質/空氣/噪音/地質/生態，接「下載空白範本」）
+docs/                 官方代碼表 PDF＋模組開發規格（air/noise spec、水質辭典核對報告）
+tests/                黃金樣本測試框架（通用、可公開；不含真實資料）
+test_data/            測試資料（真實 raw data／成品／setup；.gitignore 排除，僅本機）
 ```
 
 **之後加空氣、噪音**：只需新增 `js/configs/air.js`、`js/db/air_db.js` 等設定檔，
@@ -59,8 +63,9 @@ tests/                驗收測試（僅本機，不隨網站公開──內含�
 | 字型/欄寬（openpyxl 交叉驗證） | PASS |
 | 解析工具單元測試 11 項 | PASS |
 
-`tests/` 含實際監測數據（fixtures 與測站名稱），**已於 .gitignore 排除、不在公開 repo**；
-本機以 `serve.bat` 開 `http://localhost:8788/tests/` 執行。
+測試框架（`tests/`）為通用程式、隨 repo 公開；**真實監測數據全部放 `test_data/`**
+（manifest.json 定義樣本清單，.gitignore 排除、僅存本機）。
+本機以 `serve.bat` 開 `http://localhost:8788/tests/` 執行全部黃金樣本。
 
 ## 資料模型重點
 
@@ -112,4 +117,8 @@ git push
 
 1. 「時間(迄)」永遠要手動填（raw data 沒有）；介面會預填該測站上次的值。
 2. 溶氧方法預設覆寫 W422（申報慣例）；要照報告原文時到「對照表編輯→檢測方法覆寫」刪掉溶氧那列。
-3. 環境部完整單位代碼表（1~161）官方範本未附；內建常用 8 種，遇新單位會出警告，補一次即可。
+3. 官方單位代碼表（1–161）與檢測機構代碼表已完整內建（「規範查閱」可搜尋、附 PDF 原檔）；
+   解析用的「單位→代碼」對照遇新單位仍會出警告，至「對照表編輯」補一次即可。
+4. 與官方水質辭典的核對結果（含 mg P/L 代碼 41 vs 47 等待確認事項）見
+   `docs/water_dictionary_check.md`；空氣、噪音模組開發規格見 `docs/air_module_spec.md`、
+   `docs/noise_module_spec.md`。

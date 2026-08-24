@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<title>Yang-analyze web — 黃金樣本測試</title>
+<link rel="stylesheet" href="../css/main.css?v=2">
+<style>
+  /* 測試頁專用樣式，與主程式無關 */
+  body { padding: 30px 40px; }
+  #banner { font-size: 1.3rem; font-weight: 700; padding: 14px 22px; border-radius: 8px; margin-bottom: 18px; }
+  #banner.pass { background: #e6f5ee; color: #1a7f4e; border: 1px solid #1a7f4e; }
+  #banner.fail { background: #fdecec; color: #d23b3b; border: 1px solid #d23b3b; }
+  #banner.running { background: #fff7e0; color: #8a6d1a; border: 1px solid #e6c65a; }
+  table.rpt { border-collapse: collapse; font-size: .85rem; margin: 10px 0 22px; }
+  .rpt th, .rpt td { border: 1px solid #dde3ec; padding: 5px 12px; }
+  .rpt th { background: #f0f4fa; }
+  .ok { color: #1a7f4e; font-weight: 600; }
+  .ng { color: #d23b3b; font-weight: 600; }
+  h2 { font-size: 1.05rem; margin: 22px 0 6px; }
+  #manual { margin: 14px 0; padding: 14px; border: 1px dashed #b9c6d8; border-radius: 8px; }
+</style>
+</head>
+<body>
+<h1>黃金樣本測試：raw data → 匯出 → 與成品逐格比對</h1>
+<p>測試案例定義於 <code>test_data/manifest.json</code>（真實監測數據不隨程式碼公開，
+只存在本機的 test_data/ 資料夾）。每個案例：解析 raw data → 套用 setup.json
+（測站記憶＋手動「時間(迄)」＋案場）→ 匯出 → 與成品檔逐格比對，全部一致才算通過。</p>
+<div id="banner" class="running">測試執行中…</div>
+<div id="manual" hidden>
+  <strong>手動選檔（水質單一樣本）：</strong><br><br>
+  raw data 1：<input type="file" id="pick-raw1" accept=".xls,.xlsx,.xlsm"><br>
+  raw data 2：<input type="file" id="pick-raw2" accept=".xls,.xlsx,.xlsm"><br>
+  成品（預期）：<input type="file" id="pick-expected" accept=".xlsx"><br>
+  setup.json：<input type="file" id="pick-setup" accept=".json"><br><br>
+  <button id="btn-run-manual">執行測試</button>
+</div>
+<div id="report"></div>
+
+<script src="../lib/xlsx.full.min.js?v=2"></script>
+<script src="../js/db/water_db.js?v=2"></script>
+<script src="../js/db/code_tables.js?v=2"></script>
+<script src="../js/core/xlsxwriter.js?v=2"></script>
+<script src="../js/core/reader.js?v=2"></script>
+<script src="../js/core/parser.js?v=2"></script>
+<script src="../js/core/validator.js?v=2"></script>
+<script src="../js/core/exporter.js?v=2"></script>
+<script src="../js/configs/water.js?v=2"></script>
+<script src="compare_test.js?v=2"></script>
+</body>
+</html>

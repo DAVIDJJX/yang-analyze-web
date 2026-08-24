@@ -180,6 +180,28 @@ table.mgmt { border-collapse: collapse; width: 100%; font-size: .85rem; }
 .tab.active { background: var(--c-panel); color: var(--c-text); font-weight: 600; }
 .kv-note { color: var(--c-sub); font-size: .82rem; margin: 4px 0 12px; }
 
+/* ---------------- 空白範本選單 ---------------- */
+.tpl-menu-wrap { position: relative; }
+.tpl-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20;
+  background: var(--c-panel); border: 1px solid var(--c-border); border-radius: 8px;
+  box-shadow: 0 6px 22px rgba(20, 35, 60, .18); min-width: 220px; padding: 6px 0;
+}
+.tpl-menu-title { font-size: .72rem; color: var(--c-sub); padding: 4px 14px 6px; letter-spacing: 1px; }
+.tpl-menu a { display: block; padding: 7px 14px; color: var(--c-text); text-decoration: none; font-size: .88rem; }
+.tpl-menu a:hover { background: #eef4ff; color: var(--c-accent); }
+
+/* ---------------- 規範查閱：代碼表 ---------------- */
+.filter-input {
+  font: inherit; font-size: .85rem; margin: 10px 0 8px;
+  padding: 6px 10px; border: 1px solid var(--c-border); border-radius: 5px; width: min(360px, 100%);
+}
+.code-table-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--c-border); border-radius: 6px; width: fit-content; max-width: 100%; }
+.code-table-wrap table { margin: 0; }
+.code-table-wrap thead th { position: sticky; top: 0; background: #f0f4fa; }
+.rules details { margin: 6px 0; }
+.rules summary { cursor: pointer; color: var(--c-accent); }
+
 /* ---------------- 規範查閱 ---------------- */
 .rules h2 { font-size: 1.02rem; margin: 18px 0 8px; border-left: 4px solid var(--c-accent); padding-left: 8px; }
 .rules table { border-collapse: collapse; font-size: .85rem; margin: 6px 0; }

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yang-analyze web — 環境監測數據分析</title>
-<link rel="stylesheet" href="css/main.css">
+<link rel="stylesheet" href="css/main.css?v=2">
 </head>
 <body>
 <div id="app">
@@ -65,7 +65,17 @@
 
       <div id="action-bar">
         <span id="missing-info"></span>
-        <button class="btn" id="btn-blank">下載空白範本</button>
+        <div class="tpl-menu-wrap">
+          <button class="btn" id="btn-blank">下載空白範本 ▾</button>
+          <div class="tpl-menu hidden" id="tpl-menu">
+            <div class="tpl-menu-title">官方空白範本</div>
+            <a href="templates/water_template.xlsx" download="水質檢測資料填寫.xlsx">水質檢測資料填寫</a>
+            <a href="templates/air_template.xlsx" download="空氣品質監測填寫.xlsx">空氣品質監測填寫</a>
+            <a href="templates/noise_template.xlsx" download="噪音監測資料填寫.xlsx">噪音監測資料填寫</a>
+            <a href="templates/geo_template.xlsx" download="地質檢測資料填寫.xlsx">地質檢測資料填寫</a>
+            <a href="templates/eco_template.xlsx" download="調查類_生態資料填寫.xlsx">調查類_生態資料填寫</a>
+          </div>
+        </div>
         <button class="btn danger" id="btn-clear">清除</button>
         <button class="btn primary" id="btn-export" disabled>匯出 Excel</button>
       </div>
@@ -132,18 +142,55 @@
     <!-- ---- 規範查閱 ---- -->
     <section id="view-rules" class="view hidden">
       <header class="view-head"><h1>規範查閱</h1>
-        <p class="desc">整理自環境部「環境監測填寫範本」水質資料辭典（115/7/22 版）。</p>
+        <p class="desc">整理自環境部「環境監測填寫範本」各資料辭典與官方代碼表（搭配 115/7/22 版範本）。</p>
       </header>
       <div class="panel rules">
+        <h2>官方文件下載</h2>
+        <p>
+          <a href="docs/unit_codes_v2.pdf" target="_blank" rel="noopener">檢測單位代碼表 V2（PDF）</a> ·
+          <a href="docs/agency_codes_v1.pdf" target="_blank" rel="noopener">檢測機構代碼表 V1（PDF）</a>
+          <span class="note">（搭配 115/7/22 版環境監測填寫範本使用）</span>
+        </p>
+        <p>官方空白範本：
+          <a href="templates/water_template.xlsx" download="水質檢測資料填寫.xlsx">水質</a> ·
+          <a href="templates/air_template.xlsx" download="空氣品質監測填寫.xlsx">空氣品質</a> ·
+          <a href="templates/noise_template.xlsx" download="噪音監測資料填寫.xlsx">噪音</a> ·
+          <a href="templates/geo_template.xlsx" download="地質檢測資料填寫.xlsx">地質</a> ·
+          <a href="templates/eco_template.xlsx" download="調查類_生態資料填寫.xlsx">生態</a>
+        </p>
+
+        <h2>檢測單位代碼表（1–161，完整）</h2>
+        <details>
+          <summary>展開查閱／搜尋</summary>
+          <input class="filter-input" id="unit-filter" placeholder="輸入單位文字或代碼過濾，例如 mg/L、47">
+          <div class="code-table-wrap"><table id="unit-code-table">
+            <thead><tr><th>代碼</th><th>單位</th></tr></thead><tbody></tbody>
+          </table></div>
+        </details>
+        <p class="note">160＝其他（請自行填寫「其他檢測濃度/質量單位」）、161＝無。
+          注意：辭典內文寫「填寫159代碼時請自行填入其他單位」，但代碼表 V2 中 159=dB、160 才是「其他」——以代碼表 V2 為準。</p>
+
+        <h2>檢測機構代碼表（許可證號，完整）</h2>
+        <details>
+          <summary>展開查閱／搜尋</summary>
+          <input class="filter-input" id="agency-filter" placeholder="輸入機構名稱或代碼過濾，例如 36">
+          <div class="code-table-wrap"><table id="agency-code-table">
+            <thead><tr><th>代碼</th><th>檢測機構</th></tr></thead><tbody></tbody>
+          </table></div>
+        </details>
+        <p class="note">AA＝其他（需填「其他檢測機構名稱」）；多個機構以半形分號隔開，例 1; 2。</p>
+
         <h2>座標系統代碼</h2>
         <table>
-          <tr><th>代碼</th><th>座標系統</th><th>X 範圍</th><th>Y 範圍</th></tr>
-          <tr><td>2</td><td>WGS84（經緯度）</td><td>116~125（例 120.309）</td><td>20~26（例 22.994）</td></tr>
-          <tr><td>3</td><td>TWD97-TM2（二度分帶）</td><td>6 位數（例 193150）</td><td>7 位數（例 2670900）</td></tr>
+          <tr><th>代碼</th><th>座標系統</th><th>備考</th></tr>
+          <tr><td>1</td><td>TWD97</td><td>新版辭典增列</td></tr>
+          <tr><td>2</td><td>WGS84（經緯度）</td><td>X 116~125（例 120.309）、Y 20~26（例 22.994）</td></tr>
+          <tr><td>3</td><td>TWD97-TM2（二度分帶）</td><td>X 6 位數（例 193150）、Y 7 位數（例 2670900）</td></tr>
         </table>
 
         <h2>水質檢測類別（擇一填寫）</h2>
-        <p>飲用水、自來水、河川、水庫、海域海灘、地下水、水下噪音-打樁、水下噪音-風場範圍、污廢水、回收水、雨水</p>
+        <p>新版辭典共 9 種：飲用水、自來水、河川、水庫、海域海灘、地下水、水下噪音-打樁、水下噪音-風場範圍、污廢水
+          <span class="note">（舊版曾含「回收水、雨水」，工具下拉暫保留以相容）</span></p>
 
         <h2>特殊值填法</h2>
         <table>
@@ -151,7 +198,7 @@
           <tr><td>低於偵測極限（報告寫 ND）</td><td>ND</td><td>ND</td><td>檢測極限欄附 MDL</td></tr>
           <tr><td>無法檢測（報告寫 NA）</td><td>未檢測</td><td>未檢測</td><td>如無水可採、水量不足</td></tr>
           <tr><td>小於某值（報告寫 &lt;x）</td><td>&lt;</td><td>x</td><td></td></tr>
-          <tr><td>比較關係僅允許</td><td colspan="3">＞、＜、ND 三種（本工具依實務另用「未檢測」）</td></tr>
+          <tr><td>比較關係允許值</td><td colspan="3">新版辭典共 7 種：＝、＞、＜、ND、TNTC、未檢測、其他</td></tr>
         </table>
 
         <h2>其他必知規則</h2>
@@ -159,8 +206,9 @@
           <tr><th>欄位</th><th>規則</th></tr>
           <tr><td>日期</td><td>西元 yyyy/mm/dd，勿用民國年（工具已自動 +1911 轉換）</td></tr>
           <tr><td>時間</td><td>24 小時制 00:00~23:59，勿輸入 24:00 或分號</td></tr>
-          <tr><td>檢測濃度/質量單位</td><td>填單位代碼 1~161；160=其他（需填「其他檢測濃度/質量單位」）；161=無單位</td></tr>
-          <tr><td>檢測機構許可證號</td><td>1~206 之數字或 AA（AA 需填「其他檢測機構名稱」）；多個以半形分號隔開</td></tr>
+          <tr><td>檢測數值</td><td>填大於 0 之數字；無檢測則不填；低於方法偵測極限填 ND</td></tr>
+          <tr><td>檢測極限</td><td>填數值；數值為 ND 時可填 ND 或 MDL、QDL；無則不填</td></tr>
+          <tr><td>檢測機構許可證號</td><td>依代碼表 V1 填機構代碼或 AA；多個以半形分號隔開</td></tr>
           <tr><td>檢測方法</td><td>50 字以內；本工具依申報慣例去除版次（NIEA W217.51A → NIEA W217），溶氧依歷次申報填 NIEA W422</td></tr>
           <tr><td>計畫代碼</td><td>新版格式「英文-四碼流水號」，例 E-0001；勿用舊版三碼（如 E-001）</td></tr>
         </table>
@@ -170,7 +218,6 @@
           <a href="https://eiadoc.moenv.gov.tw/eiaweb/" target="_blank" rel="noopener">環評書件查詢系統</a> ·
           <a href="https://www.moenv.gov.tw/" target="_blank" rel="noopener">環境部</a>
         </p>
-        <p class="note">完整單位代碼表（1~161）官方範本未附，工具內建常用代碼，遇到新單位請至「對照表編輯」新增。</p>
       </div>
     </section>
 
@@ -202,19 +249,20 @@
 <div id="toast"></div>
 
 <!-- 函式庫（本地載入，無 CDN 依賴） -->
-<script src="lib/xlsx.full.min.js"></script>
+<script src="lib/xlsx.full.min.js?v=2"></script>
 <!-- 對照表資料庫 -->
-<script src="js/db/water_db.js"></script>
+<script src="js/db/water_db.js?v=2"></script>
+<script src="js/db/code_tables.js?v=2"></script>
 <!-- 共用引擎 -->
-<script src="js/core/xlsxwriter.js"></script>
-<script src="js/core/reader.js"></script>
-<script src="js/core/parser.js"></script>
-<script src="js/core/validator.js"></script>
-<script src="js/core/exporter.js"></script>
-<script src="js/core/storage.js"></script>
+<script src="js/core/xlsxwriter.js?v=2"></script>
+<script src="js/core/reader.js?v=2"></script>
+<script src="js/core/parser.js?v=2"></script>
+<script src="js/core/validator.js?v=2"></script>
+<script src="js/core/exporter.js?v=2"></script>
+<script src="js/core/storage.js?v=2"></script>
 <!-- 模組設定檔 -->
-<script src="js/configs/water.js"></script>
+<script src="js/configs/water.js?v=2"></script>
 <!-- 介面 -->
-<script src="js/app.js"></script>
+<script src="js/app.js?v=2"></script>
 </body>
 </html>

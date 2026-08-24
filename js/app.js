@@ -94,6 +94,7 @@
         if (btn.dataset.view === "stations") renderStationsView();
         if (btn.dataset.view === "projects") renderProjectsView();
         if (btn.dataset.view === "tables") renderTablesView();
+        if (btn.dataset.view === "rules") renderRulesView();
         $("#action-bar").classList.toggle("hidden", btn.dataset.view !== "convert");
       });
     });
@@ -370,9 +371,18 @@
   /* ================= 匯出 / 空白範本 / 清除 ================= */
   function bindActions() {
     $("#btn-export").addEventListener("click", doExport);
-    $("#btn-blank").addEventListener("click", function () {
-      var bytes = C.exporter.buildWorkbook(CFG, [], null);
-      C.exporter.download(bytes, CFG.blankTemplateName);
+    // 空白範本：官方五類範本選單
+    $("#btn-blank").addEventListener("click", function (e) {
+      e.stopPropagation();
+      $("#tpl-menu").classList.toggle("hidden");
+    });
+    document.addEventListener("click", function (e) {
+      if (!e.target.closest || !e.target.closest(".tpl-menu-wrap")) {
+        $("#tpl-menu").classList.add("hidden");
+      }
+    });
+    $("#tpl-menu").addEventListener("click", function () {
+      $("#tpl-menu").classList.add("hidden");
     });
     $("#btn-clear").addEventListener("click", function () {
       if (state.records.length && !confirm("清除目前的解析結果？（已存於匯入紀錄的資料不受影響）")) return;
@@ -766,6 +776,32 @@
     td3.appendChild(bDel);
     tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
     return tr;
+  }
+
+  /* ================= 規範查閱：官方代碼表 ================= */
+  var rulesRendered = false;
+  function renderRulesView() {
+    if (rulesRendered) return;
+    rulesRendered = true;
+    fillCodeTable("#unit-code-table", "#unit-filter", DB.unitCodeTable);
+    fillCodeTable("#agency-code-table", "#agency-filter", DB.agencyCodeTable);
+  }
+  function fillCodeTable(tableSel, filterSel, data) {
+    var tbody = $(tableSel + " tbody");
+    if (!tbody) return;
+    Object.keys(data).forEach(function (code) {
+      var tr = el("tr");
+      tr.appendChild(el("td", "num", code));
+      tr.appendChild(el("td", null, data[code]));
+      tr.dataset.text = (code + " " + data[code]).toLowerCase();
+      tbody.appendChild(tr);
+    });
+    $(filterSel).addEventListener("input", function () {
+      var q = this.value.trim().toLowerCase();
+      Array.prototype.forEach.call(tbody.children, function (tr) {
+        tr.classList.toggle("hidden", q !== "" && tr.dataset.text.indexOf(q) < 0);
+      });
+    });
   }
 
   /* ================= 對外（測試/除錯用） ================= */

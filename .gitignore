@@ -1,11 +1,13 @@
-# ---- 真實監測數據不進公開 repo ----
-# 驗收測試整包排除：fixtures 是真實 raw data/成品，compare_test.js 內含真實測站名稱
-tests/
+# ---- 真實監測數據一律不進公開 repo ----
+# 黃金樣本與真實 raw data／成品／測試設定全部放 test_data/（含測站名稱等真實資訊）
+test_data/
 
-# 任何 Excel（raw data、匯出的成品檔）一律不進 repo
+# 任何 Excel 預設不進 repo…
 *.xlsx
 *.xls
 *.xlsm
+# …但官方空白範本（僅標題列，無真實資料）例外
+!templates/*.xlsx
 
 # 瀏覽器匯出的備份檔（含案場/測站等真實資料）
 *備份*.json
