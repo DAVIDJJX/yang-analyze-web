@@ -126,6 +126,34 @@
     return { records: records, warnings: warnings };
   }
 
+  /* ----------------------------------------------------------------------
+   * parseFilesMulti(fileModels, jobs) → {records, warnings}
+   *   jobs: [{config, ctx}] — 每張工作表由第一個 detectSheet 命中的模組解析；
+   *   全部未命中才列警告。單模組行為與 parseFiles 相同（parseFiles 保留不動）。
+   * ---------------------------------------------------------------------- */
+  function parseFilesMulti(fileModels, jobs) {
+    var records = [], warnings = [];
+    fileModels.forEach(function (fm) {
+      var oneFile = { fileName: fm.fileName, sheetNames: null, sheet: fm.sheet };
+      fm.sheetNames.forEach(function (sn) {
+        var acc = fm.sheet(sn);
+        var job = null;
+        for (var i = 0; i < jobs.length; i++) {
+          if (jobs[i].config.detectSheet(acc)) { job = jobs[i]; break; }
+        }
+        if (!job) {
+          warnings.push(fm.fileName + " [" + sn + "]：無法辨識的工作表格式，已略過");
+          return;
+        }
+        oneFile.sheetNames = [sn];
+        var res = parseFiles([oneFile], job.config, job.ctx);
+        records = records.concat(res.records);
+        warnings = warnings.concat(res.warnings);
+      });
+    });
+    return { records: records, warnings: warnings };
+  }
+
   YangCore.helpers = helpers;
-  YangCore.parser = { parseFiles: parseFiles, findStation: findStation };
+  YangCore.parser = { parseFiles: parseFiles, parseFilesMulti: parseFilesMulti, findStation: findStation };
 })();

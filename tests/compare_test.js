@@ -85,8 +85,8 @@
      檢測項目表 A~E（mm-dd-yy / h:mm）、基本資料表 E~G（mm-dd-yy）。
      成品檔上零星的殘留格式（字串儲存格不受數字格式影響）不列入比對。 */
   var FMT_COLS_BASIC = [4, 5, 6], FMT_COLS_ITEM = [0, 1, 2, 3, 4];
-  function compareSheets(wsExp, wsGot, sheetName, isBasic, diffs, stats) {
-    var fmtCols = isBasic ? FMT_COLS_BASIC : FMT_COLS_ITEM;
+  function compareSheets(wsExp, wsGot, sheetName, isBasic, diffs, stats, checkFormats) {
+    var fmtCols = (checkFormats === false) ? [] : (isBasic ? FMT_COLS_BASIC : FMT_COLS_ITEM);
     var refExp = wsExp["!ref"] || "A1:A1", refGot = wsGot["!ref"] || "A1:A1";
     var rngE = XLSX.utils.decode_range(refExp), rngG = XLSX.utils.decode_range(refGot);
     if (rngE.e.r !== rngG.e.r || rngE.e.c !== rngG.e.c) diffs.push([sheetName, "(範圍)", refExp, refGot]);
@@ -109,6 +109,96 @@
         }
       }
     }
+  }
+
+  /* ----------------------------------------------------------------------
+   * byStation 比對模式（setup.compare === "byStation"）：
+   * 適用「預期檔為手工維護、列順序不定」的情況（如空氣舊檔）。
+   * 逐測站×逐測項對齊比對；setup.knownDeviations 白名單記錄預期檔的既知
+   * 手工不一致（列為「既知偏差」，不計失敗；白名單外的差異一律 FAIL）。
+   * ---------------------------------------------------------------------- */
+  function colLetter(i) { return String.fromCharCode(65 + i); } // 0→A（此範圍夠用）
+  function rowsBySite(ws, siteCol, itemCol) {
+    var rng = XLSX.utils.decode_range(ws["!ref"]);
+    var map = {};
+    for (var r = 1; r <= rng.e.r; r++) {
+      var cells = [];
+      for (var c = 0; c <= rng.e.c; c++) {
+        var cell = ws[XLSX.utils.encode_cell({ r: r, c: c })];
+        var v = cell ? cell.v : undefined;
+        if (typeof v === "string" && v.trim() === "") v = undefined; // ''≡空白
+        cells.push(v);
+      }
+      var site = cells[siteCol];
+      if (site === undefined) continue;
+      (map[site] = map[site] || []).push({ item: cells[itemCol], cells: cells });
+    }
+    return map;
+  }
+  function compareByStation(wsExp, wsGot, setup, diffs, devs, stats) {
+    var dv = setup.knownDeviations || {};
+    var SITE = 4, ITEM = 14, R = 17, S = 18;
+    var expMap = rowsBySite(wsExp, SITE, ITEM);
+    var gotMap = rowsBySite(wsGot, SITE, ITEM);
+
+    // 預期檔獨有的測站（raw data 無對應工作表）
+    Object.keys(expMap).forEach(function (site) {
+      if (gotMap[site]) return;
+      if ((dv.ignoreExpectedSites || []).indexOf(site) >= 0) {
+        devs.push(["測站「" + site + "」", "-", "預期檔獨有（raw data 無對應工作表），不比對",
+          expMap[site].length + " 列"]);
+      } else {
+        diffs.push(["(byStation)", site, "預期檔有此測站，匯出沒有", "-"]);
+      }
+    });
+
+    Object.keys(gotMap).forEach(function (site) {
+      var expRows = expMap[site];
+      if (!expRows) { diffs.push(["(byStation)", site, "-", "匯出有此測站，預期檔沒有"]); return; }
+      var legacy = (dv.legacyLtSites || []).indexOf(site) >= 0;
+      gotMap[site].forEach(function (gRow) {
+        var eRow = expRows.find(function (x) { return x.item === gRow.item; });
+        if (!eRow) { diffs.push([site, String(gRow.item), "預期檔無此測項列", "-"]); return; }
+        var e = eRow.cells.slice(), g = gRow.cells;
+        // 既知偏差 1：舊式「< 值」寫在數值欄（比較關係留空）→ 正規化後比對
+        if (legacy && typeof e[S] === "string" && /^<\s*/.test(e[S]) && e[R] === undefined) {
+          var num = Number(e[S].replace(/^<\s*/, ""));
+          if (!Number.isNaN(num)) {
+            e[R] = "<"; e[S] = num;
+            devs.push([site, String(gRow.item), "舊式「< 值」寫法（正規化後比對）", String(eRow.cells[S])]);
+          }
+        }
+        for (var c = 0; c < g.length || c < e.length; c++) {
+          var ve = e[c], vg = g[c];
+          stats.compared++;
+          var same;
+          if (ve === undefined && vg === undefined) same = true;
+          else if (typeof ve === "number" && typeof vg === "number") same = Math.abs(ve - vg) < 1e-9;
+          else same = (ve === vg);
+          if (same) { if (ve !== undefined) stats.valued++; continue; }
+          var L = colLetter(c);
+          // 既知偏差 2：預期檔漏填——整站整欄（missingCols）或特定測項儲存格（missingCells）
+          var missByCol = dv.missingCols && (dv.missingCols[site] || []).indexOf(L) >= 0;
+          var missByCell = dv.missingCells && dv.missingCells[site] &&
+            (dv.missingCells[site][gRow.item] || []).indexOf(L) >= 0;
+          if (ve === undefined && vg !== undefined && (missByCol || missByCell)) {
+            devs.push([site, String(gRow.item), "預期檔 " + L + " 欄漏填（匯出補齊為 " + vg + "）", "-"]);
+            continue;
+          }
+          // 既知偏差 3：檢測方法歷史寫法不一（待使用者裁定）
+          if (c === 20 && dv.methodVariants && dv.methodVariants[gRow.item] &&
+              dv.methodVariants[gRow.item].indexOf(String(ve)) >= 0 &&
+              dv.methodVariants[gRow.item].indexOf(String(vg)) >= 0) {
+            devs.push([site, String(gRow.item), "方法寫法不一：預期=" + ve + "／匯出=" + vg, "待確認"]);
+            continue;
+          }
+          diffs.push([site + " / " + gRow.item, L, String(ve), String(vg)]);
+        }
+      });
+      if (expRows.length !== gotMap[site].length) {
+        diffs.push([site, "(列數)", String(expRows.length), String(gotMap[site].length)]);
+      }
+    });
   }
 
   /* ---------------- 單一黃金樣本 ---------------- */
@@ -155,24 +245,45 @@
       var wbGot = XLSX.read(bytes, { type: "array", cellDates: false, cellNF: true });
       var wbExp = XLSX.read(expectedBuf, { type: "array", cellDates: false, cellNF: true });
 
-      var diffs = [], stats = { compared: 0, valued: 0, fmtDiffs: [] };
+      var diffs = [], devs = [], stats = { compared: 0, valued: 0, fmtDiffs: [] };
       var sheetsOk = JSON.stringify(wbExp.SheetNames) === JSON.stringify(wbGot.SheetNames);
-      wbExp.SheetNames.forEach(function (sn, i) {
-        if (wbGot.Sheets[sn]) compareSheets(wbExp.Sheets[sn], wbGot.Sheets[sn], sn, i === 0, diffs, stats);
-      });
+      if (setup.compare === "byStation") {
+        // 基本資料表照位置比；檢測項目表逐測站對齊比（預期檔列順序不定）
+        var basicName = wbExp.SheetNames[0], itemName = wbExp.SheetNames[1];
+        if (wbGot.Sheets[basicName]) {
+          compareSheets(wbExp.Sheets[basicName], wbGot.Sheets[basicName], basicName, true, diffs, stats, setup.checkFormats);
+        }
+        if (wbGot.Sheets[itemName]) {
+          compareByStation(wbExp.Sheets[itemName], wbGot.Sheets[itemName], setup, diffs, devs, stats);
+        }
+      } else {
+        wbExp.SheetNames.forEach(function (sn, i) {
+          if (wbGot.Sheets[sn]) compareSheets(wbExp.Sheets[sn], wbGot.Sheets[sn], sn, i === 0, diffs, stats, setup.checkFormats);
+        });
+      }
 
       var t3 = table(["逐格比對", "結果", "判定"]);
       row(t3, ["工作表名稱", wbGot.SheetNames.join("、"), sheetsOk ? "PASS" : "FAIL"]);
       row(t3, ["比對儲存格總數", String(stats.compared), ""]);
       row(t3, ["其中有值且一致", String(stats.valued), ""]);
-      row(t3, ["值不一致數（預期 0）", String(diffs.length), diffs.length === 0 ? "PASS" : "FAIL"]);
-      row(t3, ["日期/時間欄顯示格式差異（規格定義欄位）", String(stats.fmtDiffs.length),
-        stats.fmtDiffs.length === 0 ? "PASS" : "FAIL"]);
+      row(t3, ["值不一致數（預期 0，不含既知偏差）", String(diffs.length), diffs.length === 0 ? "PASS" : "FAIL"]);
+      if (setup.checkFormats !== false) {
+        row(t3, ["日期/時間欄顯示格式差異（規格定義欄位）", String(stats.fmtDiffs.length),
+          stats.fmtDiffs.length === 0 ? "PASS" : "FAIL"]);
+      }
+      if (devs.length) {
+        row(t3, ["既知偏差（預期檔手工不一致，白名單，不計失敗）", String(devs.length), ""]);
+      }
 
       if (diffs.length) {
         h2("差異明細（最多 60 筆）");
-        var t4 = table(["工作表", "儲存格", "預期（成品）", "實際（匯出）"]);
+        var t4 = table(["位置", "欄", "預期（成品）", "實際（匯出）"]);
         diffs.slice(0, 60).forEach(function (d) { row(t4, d); });
+      }
+      if (devs.length) {
+        h2("既知偏差明細（預期檔的手工不一致，詳 setup.json knownDeviations）");
+        var t6 = table(["測站", "測項", "說明", "備考"]);
+        devs.forEach(function (d) { row(t6, d); });
       }
       if (stats.fmtDiffs.length) {
         h2("格式差異明細");

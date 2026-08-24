@@ -225,6 +225,14 @@ table.mgmt { border-collapse: collapse; width: 100%; font-size: .85rem; }
 #toast.show { opacity: .96; }
 #toast.error { background: var(--c-danger); }
 
+/* ---------------- 預覽：模組分組標題 ---------------- */
+.preview-mod-title {
+  font-weight: 700; font-size: .95rem; color: #33475e;
+  padding: 10px 12px 6px; background: #f0f4fa; border-bottom: 1px solid var(--c-border);
+  position: sticky; left: 0;
+}
+.form-grid textarea { font: inherit; font-size: .8rem; padding: 6px 8px; border: 1px solid var(--c-border); border-radius: 5px; width: 100%; resize: vertical; }
+
 /* ---------------- 匯出確認對話框 ---------------- */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 60;

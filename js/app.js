@@ -4,7 +4,16 @@
  * ========================================================================= */
 (function () {
   "use strict";
-  var C = window.YangCore, CFG = window.YangConfigs.water, DB = window.YangDB;
+  var C = window.YangCore, DB = window.YangDB;
+  var MODULE_IDS = ["water", "air"];                       // 已啟用的分析種類（噪音待開發）
+  function cfgOf(mid) { return window.YangConfigs[mid]; }
+  function cfgOfRec(rec) { return cfgOf(rec.module); }
+  function enabledModules() {
+    var list = [];
+    if ($("#mod-water").checked) list.push("water");
+    if ($("#mod-air").checked) list.push("air");
+    return list;
+  }
 
   var state = {
     files: [],            // {name}
@@ -76,23 +85,27 @@
     return C.storage.getAll("projects").then(function (rows) { state.projects = rows || []; });
   }
   function loadTables() {
-    var merged = {}, stored = {};
-    return Promise.all(CFG.tableNames.map(function (name) {
-      return C.storage.get("tables", CFG.id + "." + name).then(function (row) {
-        if (row) stored[name] = row;
-        merged[name] = row ? row.data : JSON.parse(JSON.stringify(DB.water[name]));
+    var tables = {}, stored = {}, ops = [];
+    MODULE_IDS.forEach(function (mid) {
+      tables[mid] = {};
+      cfgOf(mid).tableNames.forEach(function (name) {
+        ops.push(C.storage.get("tables", mid + "." + name).then(function (row) {
+          if (row) stored[mid + "." + name] = row;
+          tables[mid][name] = row ? row.data : JSON.parse(JSON.stringify(DB[mid][name]));
+        }));
       });
-    })).then(function () {
-      state.tables = merged;
-      state.storedTables = stored;
+    });
+    return Promise.all(ops).then(function () {
+      state.tables = tables;        // state.tables[mid][name] = 合併後對照表
+      state.storedTables = stored;  // key: mid.name
     });
   }
 
-  /* 自訂表存檔時記錄的 baseVersion 比內建預設舊 → 需提示合併 */
-  function outdatedTableNames() {
-    return CFG.tableNames.filter(function (name) {
-      var row = state.storedTables[name];
-      return row && (row.baseVersion || 0) < DB.water.tablesVersion;
+  /* 自訂表存檔時記錄的 baseVersion 比該模組內建預設舊 → 需提示合併 */
+  function outdatedTableNames(mid) {
+    return cfgOf(mid).tableNames.filter(function (name) {
+      var row = state.storedTables[mid + "." + name];
+      return row && (row.baseVersion || 0) < DB[mid].tablesVersion;
     });
   }
 
@@ -157,7 +170,8 @@
   }
 
   function handleFiles(files) {
-    if (!$("#mod-water").checked) { toast("請先勾選「水質」分析種類", true); return Promise.resolve(); }
+    var enabled = enabledModules();
+    if (!enabled.length) { toast("請先勾選至少一種分析種類", true); return Promise.resolve(); }
     var ok = [], bad = [];
     files.forEach(function (f) { (C.reader.isAccepted(f.name) ? ok : bad).push(f); });
     if (bad.length) toast("略過非 Excel 檔：" + bad.map(function (f) { return f.name; }).join("、"), true);
@@ -172,7 +186,11 @@
       });
     });
     return chain.then(function () {
-      var res = C.parser.parseFiles(models, CFG, { stations: state.stations, tables: state.tables });
+      // 每張工作表由第一個 detectSheet 命中的已勾選模組解析
+      var jobs = enabled.map(function (mid) {
+        return { config: cfgOf(mid), ctx: { stations: state.stations, tables: state.tables[mid] } };
+      });
+      var res = C.parser.parseFilesMulti(models, jobs);
       state.records = state.records.concat(res.records);
       state.warnings = state.warnings.concat(res.warnings);
       ok.forEach(function (f) { state.files.push({ name: f.name }); });
@@ -185,8 +203,22 @@
   }
 
   /* ================= 預覽表 ================= */
+  /* records 依模組分組（保持出現順序） */
+  function recordGroups() {
+    var groups = [];
+    state.records.forEach(function (rec) {
+      var g = groups.find(function (x) { return x.mid === rec.module; });
+      if (!g) { g = { mid: rec.module, recs: [] }; groups.push(g); }
+      g.recs.push(rec);
+    });
+    return groups;
+  }
+
   function refreshConvert() {
-    state.missing = C.validator.validate(state.records, CFG);
+    state.missing = [];
+    recordGroups().forEach(function (g) {
+      state.missing = state.missing.concat(C.validator.validate(g.recs, cfgOf(g.mid)));
+    });
     renderFileList(); renderWarnings(); renderPreview(); updateStatusBar();
   }
 
@@ -219,15 +251,22 @@
     $("#preview-legend").hidden = state.records.length === 0;
     wrap.innerHTML = "";
     if (!state.records.length) return;
-
     var miss = missingKeySet();
+    recordGroups().forEach(function (g) {
+      wrap.appendChild(el("div", "preview-mod-title", cfgOf(g.mid).label + "（" +
+        g.recs.reduce(function (s, r) { return s + r.items.length; }, 0) + " 列）"));
+      wrap.appendChild(buildPreviewTable(cfgOf(g.mid), g.recs, miss));
+    });
+  }
+
+  function buildPreviewTable(CFG, records, miss) {
     var table = el("table", "preview");
     var thead = el("thead"), trh = el("tr");
     CFG.columns.forEach(function (col) { trh.appendChild(el("th", null, col.h)); });
     thead.appendChild(trh); table.appendChild(thead);
     var tbody = el("tbody");
 
-    state.records.forEach(function (rec) {
+    records.forEach(function (rec) {
       var n = rec.items.length || 1;
       rec.items.forEach(function (it, idx) {
         var tr = el("tr");
@@ -268,7 +307,7 @@
       });
     });
     table.appendChild(tbody);
-    wrap.appendChild(table);
+    return table;
   }
 
   function updateStatusBar() {
@@ -306,7 +345,7 @@
     var uid = td.dataset.uid, key = td.dataset.key, itemIdx = parseInt(td.dataset.item, 10);
     var rec = state.records.find(function (r) { return r.uid === uid; });
     if (!rec) return;
-    var col = CFG.columns.find(function (c) { return c.key === key; });
+    var col = cfgOfRec(rec).columns.find(function (c) { return c.key === key; });
     var cur = (itemIdx < 0) ? (rec.f[key] ? rec.f[key].v : null) : (rec.items[itemIdx][key] ? rec.items[itemIdx][key].v : null);
 
     var editor;
@@ -317,10 +356,11 @@
         editor.appendChild(new Option(code + "：" + DB.water.coordSystems[code], code));
       });
       if (cur !== null && cur !== undefined) editor.value = String(cur);
-    } else if (col.edit === "category") {
+    } else if (col.edit === "category" || col.edit === "aircategory") {
       editor = el("select");
       editor.appendChild(new Option("— 請選 —", ""));
-      DB.water.categories.forEach(function (c) { editor.appendChild(new Option(c, c)); });
+      var catList = (col.edit === "aircategory") ? DB.air.categories : DB.water.categories;
+      catList.forEach(function (c) { editor.appendChild(new Option(c, c)); });
       if (cur) editor.value = cur;
     } else {
       editor = el("input");
@@ -492,7 +532,8 @@
     var t = el("table", "mgmt");
     t.innerHTML = "<tr><th>測站 / 項目</th><th>缺漏欄位</th><th>備註</th></tr>";
     state.missing.forEach(function (m) {
-      var col = CFG.columns.find(function (c) { return c.key === m.key; });
+      var rec = state.records.find(function (r) { return r.uid === m.uid; });
+      var col = rec ? cfgOfRec(rec).columns.find(function (c) { return c.key === m.key; }) : null;
       var tr = el("tr");
       tr.appendChild(el("td", null, m.message));
       tr.appendChild(el("td", null, m.label));
@@ -515,15 +556,19 @@
 
   function performExport(project) {
     try {
-      var bytes = C.exporter.buildWorkbook(CFG, state.records, project);
-      C.exporter.download(bytes, CFG.exportFileName(project));
+      // 每個模組各出一份申報檔（分組維持出現順序）
+      recordGroups().forEach(function (g, idx) {
+        var cfg = cfgOf(g.mid);
+        var bytes = C.exporter.buildWorkbook(cfg, g.recs, project);
+        setTimeout(function () { C.exporter.download(bytes, cfg.exportFileName(project)); }, idx * 400);
+      });
     } catch (e) {
       toast("匯出失敗：" + e.message, true);
       return;
     }
     // 匯出成功 → 更新測站記憶（座標、上次時間迄、別名）；缺漏(null)不覆蓋既有值
     var puts = state.records.map(function (rec) {
-      var name = rec.f.site.v;
+      var name = rec.f[cfgOfRec(rec).stationField].v;
       if (name === null || name === undefined || String(name).trim() === "") return Promise.resolve();
       var existing = state.stations.find(function (s) { return s.name === name; });
       var st = existing || { name: name, aliases: [] };
@@ -553,7 +598,7 @@
       if (!state.records.length) return;
       var obj = {
         ts: Date.now(),
-        module: CFG.id,
+        module: recordGroups().map(function (g) { return g.mid; }).join("+") || "water",
         projectCode: state.activeProjectCode,
         files: state.files.map(function (f) { return f.name; }),
         records: JSON.parse(JSON.stringify(state.records)),
@@ -738,6 +783,8 @@
       $("#pf-" + k).value = p && p[k] ? p[k] : "";
     });
     $("#pf-note").value = p && p.note ? p.note : "";
+    $("#pf-basicRows").value = (p && Array.isArray(p.basicRows) && p.basicRows.length)
+      ? JSON.stringify(p.basicRows) : "";
   }
   document.addEventListener("DOMContentLoaded", function () {
     $("#btn-add-project").addEventListener("click", function () { openProjectForm(null); });
@@ -761,9 +808,18 @@
           constructionDate: dateOrNull("#pf-constructionDate"),
           completionDate: dateOrNull("#pf-completionDate"),
           operationDate: dateOrNull("#pf-operationDate"),
-          note: $("#pf-note").value.trim() || null
+          note: $("#pf-note").value.trim() || null,
+          basicRows: null
         };
-      } catch (e) { toast(e.message, true); return; }
+        var rowsTxt = $("#pf-basicRows").value.trim();
+        if (rowsTxt) {
+          var parsedRows = JSON.parse(rowsTxt);
+          if (!Array.isArray(parsedRows) || parsedRows.some(function (r) { return !Array.isArray(r) || r.length !== 8; })) {
+            throw new Error("多列基本資料須為 JSON 陣列，每列 8 個值");
+          }
+          obj.basicRows = parsedRows;
+        }
+      } catch (e) { toast(e.message.indexOf("JSON") >= 0 ? "多列基本資料 JSON 格式錯誤" : e.message, true); return; }
       var chain = (editingProjectCode && editingProjectCode !== code)
         ? C.storage.del("projects", editingProjectCode) : Promise.resolve();
       chain.then(function () { return C.storage.put("projects", obj); })
@@ -791,46 +847,62 @@
 
   /* ================= 對照表編輯 ================= */
   var TABLE_META = {
-    unitCodes: { label: "單位 → 代碼", kh: "單位文字（空白=無單位）", vh: "環境部代碼", numeric: true },
-    sampleTypeMap: { label: "樣品特性 → 檢測類別", kh: "報告樣品特性", vh: "申報檢測類別", numeric: false },
-    itemNameMap: { label: "測項名稱對照", kh: "報告項目名稱", vh: "申報項目名稱", numeric: false },
-    methodOverrides: { label: "檢測方法覆寫", kh: "項目名稱", vh: "強制填寫的方法", numeric: false }
+    "water.unitCodes": { label: "單位 → 代碼", kh: "單位文字（空白=無單位）", vh: "環境部代碼", numeric: true, list: "unit-datalist" },
+    "water.sampleTypeMap": { label: "樣品特性 → 檢測類別", kh: "報告樣品特性", vh: "申報檢測類別", numeric: false },
+    "water.itemNameMap": { label: "測項名稱對照", kh: "報告項目名稱", vh: "申報項目名稱", numeric: false },
+    "water.methodOverrides": { label: "檢測方法覆寫", kh: "項目名稱", vh: "強制填寫的方法", numeric: false },
+    "air.unitMap": { label: "測項 → 單位代碼", kh: "監測項目", vh: "環境部單位代碼", numeric: true, list: "unit-datalist" },
+    "air.methodMap": { label: "測項 → 檢測方法", kh: "監測項目", vh: "申報檢測方法", numeric: false }
   };
+  function allTableTabs() {
+    var out = [];
+    MODULE_IDS.forEach(function (mid) {
+      cfgOf(mid).tableNames.forEach(function (name) {
+        out.push({ mid: mid, name: name, key: mid + "." + name });
+      });
+    });
+    return out;
+  }
   function renderTablesView() {
     var tabs = $("#table-tabs");
     if (!tabs) return;
-    if (!state.editingTable) state.editingTable = CFG.tableNames[0];
+    var all = allTableTabs();
+    if (!state.editingTable || !TABLE_META[state.editingTable]) state.editingTable = all[0].key;
     tabs.innerHTML = "";
-    CFG.tableNames.forEach(function (name) {
-      var b = el("button", "tab" + (name === state.editingTable ? " active" : ""), TABLE_META[name].label);
-      b.addEventListener("click", function () { state.editingTable = name; renderTablesView(); });
+    all.forEach(function (t) {
+      var b = el("button", "tab" + (t.key === state.editingTable ? " active" : ""),
+        cfgOf(t.mid).label + "｜" + TABLE_META[t.key].label);
+      b.addEventListener("click", function () { state.editingTable = t.key; renderTablesView(); });
       tabs.appendChild(b);
     });
-    renderTableEditor(state.editingTable);
-    renderTableUpdateBanner();
+    var cur = all.find(function (t) { return t.key === state.editingTable; });
+    renderTableEditor(cur.mid, cur.name);
+    MODULE_IDS.forEach(renderTableUpdateBanner);
   }
 
-  /* ---- 內建預設更新提示：合併 或 維持現狀（絕不靜默覆蓋） ---- */
-  function renderTableUpdateBanner() {
-    var old = $("#table-update-banner");
+  /* ---- 內建預設更新提示（逐模組）：合併 或 維持現狀（絕不靜默覆蓋） ---- */
+  function renderTableUpdateBanner(mid) {
+    var bannerId = "table-update-banner-" + mid;
+    var old = document.getElementById(bannerId);
     if (old) old.remove();
-    var names = outdatedTableNames();
+    var names = outdatedTableNames(mid);
     if (!names.length) return;
-    C.storage.getSetting("tablesVerDismissed." + CFG.id).then(function (dismissed) {
-      if ((dismissed || 0) >= DB.water.tablesVersion) return;
-      if ($("#table-update-banner")) return;
+    C.storage.getSetting("tablesVerDismissed." + mid).then(function (dismissed) {
+      if ((dismissed || 0) >= DB[mid].tablesVersion) return;
+      if (document.getElementById(bannerId)) return;
       var banner = el("div", "update-banner");
-      banner.id = "table-update-banner";
-      banner.appendChild(el("strong", null, "內建預設對照表已更新（v" + DB.water.tablesVersion + "）"));
+      banner.id = bannerId;
+      banner.appendChild(el("strong", null,
+        cfgOf(mid).label + "：內建預設對照表已更新（v" + DB[mid].tablesVersion + "）"));
       banner.appendChild(el("div", "update-banner-desc",
-        "受影響：" + names.map(function (n) { return TABLE_META[n].label; }).join("、") +
+        "受影響：" + names.map(function (n) { return TABLE_META[mid + "." + n].label; }).join("、") +
         "。「合併」＝保留你自訂與修改過的列，只帶入新增的預設列；「維持現狀」＝完全不動你的表。"));
       var actions = el("div", "form-actions left");
       var bMerge = el("button", "btn primary", "合併");
       bMerge.addEventListener("click", function () {
         Promise.all(names.map(function (name) {
-          var row = state.storedTables[name];
-          var defaults = DB.water[name];
+          var row = state.storedTables[mid + "." + name];
+          var defaults = DB[mid][name];
           var base = row.base || {};
           var data = JSON.parse(JSON.stringify(row.data));
           var added = [];
@@ -838,9 +910,9 @@
             if (!(k in base) && !(k in data)) { data[k] = defaults[k]; added.push(k); }
           });
           return C.storage.put("tables", {
-            name: CFG.id + "." + name, data: data,
+            name: mid + "." + name, data: data,
             base: JSON.parse(JSON.stringify(defaults)),
-            baseVersion: DB.water.tablesVersion
+            baseVersion: DB[mid].tablesVersion
           }).then(function () { return added.length; });
         })).then(function (counts) {
           var total = counts.reduce(function (s, n) { return s + n; }, 0);
@@ -852,7 +924,7 @@
       });
       var bKeep = el("button", "btn", "維持現狀");
       bKeep.addEventListener("click", function () {
-        C.storage.setSetting("tablesVerDismissed." + CFG.id, DB.water.tablesVersion).then(function () {
+        C.storage.setSetting("tablesVerDismissed." + mid, DB[mid].tablesVersion).then(function () {
           banner.remove();
           toast("已維持現狀（此版本不再提醒）");
         });
@@ -863,27 +935,32 @@
       editor.parentNode.insertBefore(banner, $("#table-tabs"));
     });
   }
-  function renderTableEditor(name) {
-    var meta = TABLE_META[name], box = $("#table-editor");
+  function renderTableEditor(mid, name) {
+    var key = mid + "." + name;
+    var meta = TABLE_META[key], box = $("#table-editor");
     box.innerHTML = "";
     var note = el("p", "kv-note");
-    if (name === "unitCodes") {
+    if (key === "water.unitCodes") {
       note.textContent = "此表只列 raw data 會出現的單位；完整官方代碼表請見";
       var link = el("a", "inline-link", "規範查閱");
       link.href = "#";
       link.addEventListener("click", function (e) { e.preventDefault(); showView("rules"); });
       note.appendChild(link);
       note.appendChild(document.createTextNode("。代碼欄可直接輸入，或從下拉（代碼－單位名稱）挑選。"));
-    } else if (name === "methodOverrides") {
+    } else if (key === "water.methodOverrides") {
       note.textContent = "在此表中的項目，匯出時一律填指定方法（目前依歷次申報慣例：溶氧→NIEA W422）。刪除該列即改為照 raw data 去版次輸出。";
+    } else if (key === "air.methodMap") {
+      note.textContent = "空氣各測項申報時填的檢測方法（氣象項目照舊填儀器名）。注意：鉛的方法預設依檢驗報告備註（NIEA A306），歷史申報檔曾出現 A301/A103，未確認前請留意。";
+    } else if (key === "air.unitMap") {
+      note.textContent = "空氣各測項的環境部單位代碼（113=ppm、140=μg/m3、161=無、28=m/sec、4=℃、1=%）。代碼欄可從下拉挑選。";
     } else {
       note.textContent = "解析時查不到的值會列入警告並要求手動補填。";
     }
     box.appendChild(note);
     var t = el("table", "mgmt");
     t.innerHTML = "<tr><th>" + escHtml(meta.kh) + "</th><th>" + escHtml(meta.vh) + "</th><th></th></tr>";
-    var data = state.tables[name];
-    var listId = (name === "unitCodes") ? "unit-datalist" : null;
+    var data = state.tables[mid][name];
+    var listId = meta.list || null;
     Object.keys(data).forEach(function (k) { t.appendChild(kvRow(t, k, data[k], listId)); });
     box.appendChild(t);
     var actions = el("div", "form-actions");
@@ -892,7 +969,7 @@
     var bReset = el("button", "btn danger", "還原預設");
     bReset.addEventListener("click", function () {
       if (!confirm("將「" + meta.label + "」還原為出廠預設？")) return;
-      C.storage.del("tables", CFG.id + "." + name).then(loadTables).then(function () {
+      C.storage.del("tables", key).then(loadTables).then(function () {
         renderTablesView(); toast("已還原預設");
       });
     });
@@ -916,9 +993,9 @@
       });
       if (bad) { toast("有列的值空白或格式錯誤", true); return; }
       C.storage.put("tables", {
-        name: CFG.id + "." + name, data: obj,
-        base: JSON.parse(JSON.stringify(DB.water[name])),   // 記住存檔當下的內建預設，供日後合併判斷
-        baseVersion: DB.water.tablesVersion
+        name: key, data: obj,
+        base: JSON.parse(JSON.stringify(DB[mid][name])),   // 記住存檔當下的內建預設，供日後合併判斷
+        baseVersion: DB[mid].tablesVersion
       })
         .then(loadTables)
         .then(function () { renderTablesView(); toast("已儲存（下次解析生效）"); });

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yang-analyze web — 環境監測數據分析</title>
-<link rel="stylesheet" href="css/main.css?v=3">
+<link rel="stylesheet" href="css/main.css?v=4">
 </head>
 <body>
 <div id="app">
@@ -16,7 +16,7 @@
     <div class="side-section">
       <div class="side-title">分析種類</div>
       <label class="chk"><input type="checkbox" id="mod-water" checked> 水質</label>
-      <label class="chk disabled"><input type="checkbox" disabled> 空氣品質 <span class="tag">開發中</span></label>
+      <label class="chk"><input type="checkbox" id="mod-air" checked> 空氣品質</label>
       <label class="chk disabled"><input type="checkbox" disabled> 噪音 <span class="tag">開發中</span></label>
     </div>
 
@@ -29,7 +29,7 @@
       <button class="nav-btn" data-view="rules">規範查閱</button>
       <button class="nav-btn" data-view="backup">設定/備份</button>
     </nav>
-    <div class="side-foot">第一階段：水質模組<br>純靜態網頁，資料只存在你的瀏覽器</div>
+    <div class="side-foot">水質＋空氣品質模組<br>純靜態網頁，資料只存在你的瀏覽器</div>
   </aside>
 
   <!-- ================= 工作區 ================= -->
@@ -38,13 +38,13 @@
     <!-- ---- 資料轉換 ---- -->
     <section id="view-convert" class="view">
       <header class="view-head">
-        <h1>資料轉換 — 水質</h1>
+        <h1>資料轉換</h1>
         <div class="project-bar">
           <span>案場</span>
           <select id="active-project"></select>
         </div>
-        <p class="desc">上傳檢驗室的「水質檢測報告」Excel（.xls / .xlsx / .xlsm，可多檔），
-          解析後於下方預覽表補齊紅色缺漏欄位，即可匯出環境部申報格式。</p>
+        <p class="desc">上傳檢驗室的「水質檢測報告」或「空氣品質檢測報告」Excel（.xls / .xlsx / .xlsm，可多檔，
+          自動辨識報告種類），解析後於下方預覽表補齊紅色缺漏欄位，即可匯出環境部申報格式。</p>
       </header>
 
       <div id="dropzone">
@@ -122,6 +122,9 @@
           <label>竣工日期</label><input id="pf-completionDate" placeholder="YYYY-MM-DD">
           <label>營運日期</label><input id="pf-operationDate" placeholder="YYYY-MM-DD">
           <label>備註</label><input class="full" id="pf-note" placeholder="100字以內">
+          <label>進階：多列基本資料</label>
+          <textarea class="full" id="pf-basicRows" rows="3"
+            placeholder='選填。部分計畫的「監測點基本資料」需列多列（如逐工程施工/竣工日期），以 JSON 陣列填入，每列 8 值：[["計畫代碼","書件案號","書件名稱","工程或現況","2009-06-26","2011-04-15","2012-04-15",null], ...]；留空則輸出上方單列。'></textarea>
         </div>
         <div class="form-actions">
           <button class="btn" id="btn-project-cancel">取消</button>
@@ -266,20 +269,22 @@
 <div id="toast"></div>
 
 <!-- 函式庫（本地載入，無 CDN 依賴） -->
-<script src="lib/xlsx.full.min.js?v=3"></script>
+<script src="lib/xlsx.full.min.js?v=4"></script>
 <!-- 對照表資料庫 -->
-<script src="js/db/water_db.js?v=3"></script>
-<script src="js/db/code_tables.js?v=3"></script>
+<script src="js/db/water_db.js?v=4"></script>
+<script src="js/db/air_db.js?v=4"></script>
+<script src="js/db/code_tables.js?v=4"></script>
 <!-- 共用引擎 -->
-<script src="js/core/xlsxwriter.js?v=3"></script>
-<script src="js/core/reader.js?v=3"></script>
-<script src="js/core/parser.js?v=3"></script>
-<script src="js/core/validator.js?v=3"></script>
-<script src="js/core/exporter.js?v=3"></script>
-<script src="js/core/storage.js?v=3"></script>
+<script src="js/core/xlsxwriter.js?v=4"></script>
+<script src="js/core/reader.js?v=4"></script>
+<script src="js/core/parser.js?v=4"></script>
+<script src="js/core/validator.js?v=4"></script>
+<script src="js/core/exporter.js?v=4"></script>
+<script src="js/core/storage.js?v=4"></script>
 <!-- 模組設定檔 -->
-<script src="js/configs/water.js?v=3"></script>
+<script src="js/configs/water.js?v=4"></script>
+<script src="js/configs/air.js?v=4"></script>
 <!-- 介面 -->
-<script src="js/app.js?v=3"></script>
+<script src="js/app.js?v=4"></script>
 </body>
 </html>

@@ -18,17 +18,21 @@
     /* ---- 樣式表（見 config.output.fonts / styles 定義） ---- */
     var spec = { fonts: out.fonts, styles: out.styles, sheets: [] };
 
-    /* ---- 工作表 1：監測點基本資料 ---- */
+    /* ---- 工作表 1：監測點基本資料 ----
+     * 預設一列（basic.build）；模組可定義 basic.buildRows 回傳多列
+     * （如空氣模組的多工程列），皆回傳 cell 定義陣列 {v, t, style}。 */
     var basic = out.basicSheet;
     var rows1 = [];
     rows1.push(basic.headers.map(function (h) {
       return { v: h, t: "s", s: basic.headerStyle };
     }));
     if (project) {
-      rows1.push(basic.headers.map(function (h, i) {
-        var cellDef = basic.build(project)[i]; // {v, t}
-        return { v: cellDef.v, t: cellDef.t, s: cellDef.style };
-      }));
+      var dataRows = basic.buildRows ? basic.buildRows(project) : [basic.build(project)];
+      dataRows.forEach(function (cells) {
+        rows1.push(cells.map(function (cellDef) {
+          return { v: cellDef.v, t: cellDef.t, s: cellDef.style };
+        }));
+      });
     }
     spec.sheets.push({ name: basic.name, cols: basic.cols || {}, rows: rows1 });
 
