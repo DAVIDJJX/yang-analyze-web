@@ -4,7 +4,7 @@
 所有資料只存在使用者瀏覽器本機）。
 第一階段：網頁骨架＋**水質模組**。
 
-> **線上版**：https://OWNER.github.io/yang-analyze-web/ （GitHub Pages）
+> **線上版**：https://davidjjx.github.io/yang-analyze-web/ （GitHub Pages）
 
 ## 使用方式
 
