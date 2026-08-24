@@ -1,0 +1,17 @@
+# ---- 真實監測數據不進公開 repo ----
+# 驗收測試整包排除：fixtures 是真實 raw data/成品，compare_test.js 內含真實測站名稱
+tests/
+
+# 任何 Excel（raw data、匯出的成品檔）一律不進 repo
+*.xlsx
+*.xls
+*.xlsm
+
+# 瀏覽器匯出的備份檔（含案場/測站等真實資料）
+*備份*.json
+yang-analyze-*.json
+
+# 雜項
+*.zip
+Thumbs.db
+desktop.ini

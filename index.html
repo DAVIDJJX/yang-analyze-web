@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yang-analyze web — 環境監測數據分析</title>
+<link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ================= 側欄 ================= -->
+  <aside id="sidebar">
+    <div class="logo">Yang-analyze <span>web</span></div>
+
+    <div class="side-section">
+      <div class="side-title">分析種類</div>
+      <label class="chk"><input type="checkbox" id="mod-water" checked> 水質</label>
+      <label class="chk disabled"><input type="checkbox" disabled> 空氣品質 <span class="tag">開發中</span></label>
+      <label class="chk disabled"><input type="checkbox" disabled> 噪音 <span class="tag">開發中</span></label>
+    </div>
+
+    <nav>
+      <button class="nav-btn active" data-view="convert">資料轉換</button>
+      <button class="nav-btn" data-view="history">匯入紀錄</button>
+      <button class="nav-btn" data-view="stations">測站管理</button>
+      <button class="nav-btn" data-view="projects">案場管理</button>
+      <button class="nav-btn" data-view="tables">對照表編輯</button>
+      <button class="nav-btn" data-view="rules">規範查閱</button>
+      <button class="nav-btn" data-view="backup">設定/備份</button>
+    </nav>
+    <div class="side-foot">第一階段：水質模組<br>純靜態網頁，資料只存在你的瀏覽器</div>
+  </aside>
+
+  <!-- ================= 工作區 ================= -->
+  <main id="main">
+
+    <!-- ---- 資料轉換 ---- -->
+    <section id="view-convert" class="view">
+      <header class="view-head">
+        <h1>資料轉換 — 水質</h1>
+        <div class="project-bar">
+          <span>案場</span>
+          <select id="active-project"></select>
+        </div>
+        <p class="desc">上傳檢驗室的「水質檢測報告」Excel（.xls / .xlsx / .xlsm，可多檔），
+          解析後於下方預覽表補齊紅色缺漏欄位，即可匯出環境部申報格式。</p>
+      </header>
+
+      <div id="dropzone">
+        <strong>拖曳 Excel 檔到這裡</strong>，或點擊選擇檔案
+        <div class="hint">每個工作表視為一個監測點；多檔會依匯入順序合併</div>
+        <input type="file" id="file-input" multiple accept=".xls,.xlsx,.xlsm" hidden>
+      </div>
+      <div id="file-list"></div>
+      <ul id="warnings"></ul>
+
+      <div class="legend" id="preview-legend" hidden>
+        <span><span class="sw missing"></span>缺漏，點擊儲存格輸入</span>
+        <span><span class="sw manual"></span>手動輸入</span>
+        <span><span class="sw memory"></span>測站記憶自動帶入</span>
+        <span>（其餘為 raw data 解析值，點擊亦可修改）</span>
+      </div>
+      <div id="preview-wrap"></div>
+
+      <div id="action-bar">
+        <span id="missing-info"></span>
+        <button class="btn" id="btn-blank">下載空白範本</button>
+        <button class="btn danger" id="btn-clear">清除</button>
+        <button class="btn primary" id="btn-export" disabled>匯出 Excel</button>
+      </div>
+    </section>
+
+    <!-- ---- 匯入紀錄 ---- -->
+    <section id="view-history" class="view hidden">
+      <header class="view-head"><h1>匯入紀錄</h1>
+        <p class="desc">每次解析會自動存檔（含手動補的值）。可重新開啟繼續編輯或再次匯出。</p>
+      </header>
+      <div class="panel" id="history-list"></div>
+    </section>
+
+    <!-- ---- 測站管理 ---- -->
+    <section id="view-stations" class="view hidden">
+      <header class="view-head"><h1>測站管理</h1>
+        <p class="desc">採樣地點的座標只需輸入一次；同名（或別名）測站解析時自動帶入。
+          「別名」用於 raw data 名稱與申報名稱不同時（例：raw 寫「○○測站放流口」，申報填「○○測站」）。</p>
+      </header>
+      <div class="panel">
+        <table class="mgmt" id="station-table"></table>
+        <div class="form-actions"><button class="btn" id="btn-add-station">＋ 新增測站</button></div>
+      </div>
+    </section>
+
+    <!-- ---- 案場管理 ---- -->
+    <section id="view-projects" class="view hidden">
+      <header class="view-head"><h1>案場管理</h1>
+        <p class="desc">每個案場填一次，匯出時自動生成「監測點基本資料」工作表。</p>
+      </header>
+      <div class="panel">
+        <table class="mgmt" id="project-table"></table>
+        <div class="form-actions"><button class="btn" id="btn-add-project">＋ 新增案場</button></div>
+      </div>
+      <div class="panel" id="project-form-panel" hidden>
+        <h3 id="project-form-title">新增案場</h3>
+        <div class="form-grid">
+          <label>計畫代碼 *</label><input id="pf-code" placeholder="例：E-0001">
+          <label>書件案號</label><input id="pf-docNo" placeholder="例：1090012A">
+          <label class="full-label">書件名稱</label><input class="full" id="pf-docName" placeholder="完整書件名稱，勿用簡寫">
+          <label>執行現況</label>
+          <select id="pf-status"><option>施工前</option><option>施工中</option><option>施工兼營運</option><option>營運中</option></select>
+          <label>施工日期</label><input id="pf-constructionDate" placeholder="YYYY-MM-DD">
+          <label>竣工日期</label><input id="pf-completionDate" placeholder="YYYY-MM-DD">
+          <label>營運日期</label><input id="pf-operationDate" placeholder="YYYY-MM-DD">
+          <label>備註</label><input class="full" id="pf-note" placeholder="100字以內">
+        </div>
+        <div class="form-actions">
+          <button class="btn" id="btn-project-cancel">取消</button>
+          <button class="btn primary" id="btn-project-save">儲存案場</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- 對照表編輯 ---- -->
+    <section id="view-tables" class="view hidden">
+      <header class="view-head"><h1>對照表編輯</h1>
+        <p class="desc">解析時使用的轉換表。修改只存在本機瀏覽器；「還原預設」可回復出廠值。</p>
+      </header>
+      <div class="tabs" id="table-tabs"></div>
+      <div class="panel" id="table-editor"></div>
+    </section>
+
+    <!-- ---- 規範查閱 ---- -->
+    <section id="view-rules" class="view hidden">
+      <header class="view-head"><h1>規範查閱</h1>
+        <p class="desc">整理自環境部「環境監測填寫範本」水質資料辭典（115/7/22 版）。</p>
+      </header>
+      <div class="panel rules">
+        <h2>座標系統代碼</h2>
+        <table>
+          <tr><th>代碼</th><th>座標系統</th><th>X 範圍</th><th>Y 範圍</th></tr>
+          <tr><td>2</td><td>WGS84（經緯度）</td><td>116~125（例 120.309）</td><td>20~26（例 22.994）</td></tr>
+          <tr><td>3</td><td>TWD97-TM2（二度分帶）</td><td>6 位數（例 193150）</td><td>7 位數（例 2670900）</td></tr>
+        </table>
+
+        <h2>水質檢測類別（擇一填寫）</h2>
+        <p>飲用水、自來水、河川、水庫、海域海灘、地下水、水下噪音-打樁、水下噪音-風場範圍、污廢水、回收水、雨水</p>
+
+        <h2>特殊值填法</h2>
+        <table>
+          <tr><th>情況</th><th>比較關係</th><th>檢測數值</th><th>備考</th></tr>
+          <tr><td>低於偵測極限（報告寫 ND）</td><td>ND</td><td>ND</td><td>檢測極限欄附 MDL</td></tr>
+          <tr><td>無法檢測（報告寫 NA）</td><td>未檢測</td><td>未檢測</td><td>如無水可採、水量不足</td></tr>
+          <tr><td>小於某值（報告寫 &lt;x）</td><td>&lt;</td><td>x</td><td></td></tr>
+          <tr><td>比較關係僅允許</td><td colspan="3">＞、＜、ND 三種（本工具依實務另用「未檢測」）</td></tr>
+        </table>
+
+        <h2>其他必知規則</h2>
+        <table>
+          <tr><th>欄位</th><th>規則</th></tr>
+          <tr><td>日期</td><td>西元 yyyy/mm/dd，勿用民國年（工具已自動 +1911 轉換）</td></tr>
+          <tr><td>時間</td><td>24 小時制 00:00~23:59，勿輸入 24:00 或分號</td></tr>
+          <tr><td>檢測濃度/質量單位</td><td>填單位代碼 1~161；160=其他（需填「其他檢測濃度/質量單位」）；161=無單位</td></tr>
+          <tr><td>檢測機構許可證號</td><td>1~206 之數字或 AA（AA 需填「其他檢測機構名稱」）；多個以半形分號隔開</td></tr>
+          <tr><td>檢測方法</td><td>50 字以內；本工具依申報慣例去除版次（NIEA W217.51A → NIEA W217），溶氧依歷次申報填 NIEA W422</td></tr>
+          <tr><td>計畫代碼</td><td>新版格式「英文-四碼流水號」，例 E-0001；勿用舊版三碼（如 E-001）</td></tr>
+        </table>
+
+        <h2>連結</h2>
+        <p>
+          <a href="https://eiadoc.moenv.gov.tw/eiaweb/" target="_blank" rel="noopener">環評書件查詢系統</a> ·
+          <a href="https://www.moenv.gov.tw/" target="_blank" rel="noopener">環境部</a>
+        </p>
+        <p class="note">完整單位代碼表（1~161）官方範本未附，工具內建常用代碼，遇到新單位請至「對照表編輯」新增。</p>
+      </div>
+    </section>
+
+    <!-- ---- 設定/備份 ---- -->
+    <section id="view-backup" class="view hidden">
+      <header class="view-head"><h1>設定 / 備份</h1>
+        <p class="desc">所有資料（案場、測站、匯入紀錄、對照表修改）都存在此瀏覽器的 IndexedDB。
+          換電腦或重灌前請先匯出備份。</p>
+      </header>
+      <div class="panel">
+        <h3>JSON 備份</h3>
+        <div class="form-actions left">
+          <button class="btn primary" id="btn-backup">匯出備份檔</button>
+          <button class="btn" id="btn-restore">還原備份…</button>
+          <input type="file" id="restore-input" accept=".json" hidden>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>危險區</h3>
+        <div class="form-actions left">
+          <button class="btn danger" id="btn-wipe">清除全部資料</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<!-- 函式庫（本地載入，無 CDN 依賴） -->
+<script src="lib/xlsx.full.min.js"></script>
+<!-- 對照表資料庫 -->
+<script src="js/db/water_db.js"></script>
+<!-- 共用引擎 -->
+<script src="js/core/xlsxwriter.js"></script>
+<script src="js/core/reader.js"></script>
+<script src="js/core/parser.js"></script>
+<script src="js/core/validator.js"></script>
+<script src="js/core/exporter.js"></script>
+<script src="js/core/storage.js"></script>
+<!-- 模組設定檔 -->
+<script src="js/configs/water.js"></script>
+<!-- 介面 -->
+<script src="js/app.js"></script>
+</body>
+</html>
