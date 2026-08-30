@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yang-analyze web — 環境監測數據分析</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="css/main.css?v=5">
+<link rel="stylesheet" href="css/main.css?v=6">
 </head>
 <body>
 <div id="app">
@@ -13,6 +13,11 @@
   <!-- ================= 側欄 ================= -->
   <aside id="sidebar">
     <div class="logo">Yang-analyze <span>web</span></div>
+
+    <div class="side-section" id="side-project">
+      <div class="side-title">目前案場</div>
+      <select id="active-project" class="side-select"></select>
+    </div>
 
     <div class="side-section">
       <div class="side-title">分析種類</div>
@@ -40,12 +45,9 @@
     <section id="view-convert" class="view">
       <header class="view-head">
         <h1>資料轉換</h1>
-        <div class="project-bar">
-          <span>案場</span>
-          <select id="active-project"></select>
-        </div>
         <p class="desc">上傳檢驗室的「水質」「空氣品質」「噪音/振動」檢測報告 Excel（.xls / .xlsx / .xlsm，
-          可多檔混放，自動辨識報告種類），解析後於下方預覽表補齊紅色缺漏欄位，即可匯出環境部申報格式。</p>
+          可多檔混放，自動辨識報告種類），解析後於下方預覽表補齊紅色缺漏欄位，即可匯出環境部申報格式。
+          資料歸屬於左欄選擇的「目前案場」。</p>
       </header>
 
       <div id="dropzone">
@@ -85,7 +87,8 @@
     <!-- ---- 匯入紀錄 ---- -->
     <section id="view-history" class="view hidden">
       <header class="view-head"><h1>匯入紀錄</h1>
-        <p class="desc">每次解析會自動存檔（含手動補的值）。可重新開啟繼續編輯或再次匯出。</p>
+        <p class="desc">每次解析會自動存檔（含手動補的值）。可重新開啟繼續編輯、再次匯出，或刪除該次匯入重來。</p>
+        <label class="filter-toggle"><input type="checkbox" id="hist-show-all"> 顯示全部案場</label>
       </header>
       <div class="panel" id="history-list"></div>
     </section>
@@ -94,7 +97,9 @@
     <section id="view-stations" class="view hidden">
       <header class="view-head"><h1>測站管理</h1>
         <p class="desc">採樣地點的座標只需輸入一次；同名（或別名）測站解析時自動帶入。
-          「別名」用於 raw data 名稱與申報名稱不同時（例：raw 寫「○○測站放流口」，申報填「○○測站」）。</p>
+          「別名」用於 raw data 名稱與申報名稱不同時（例：raw 寫「○○測站放流口」，申報填「○○測站」）。
+          測站可歸屬案場（匯出時自動歸入目前案場）；「全域」測站所有案場皆可用。</p>
+        <label class="filter-toggle"><input type="checkbox" id="station-show-all"> 顯示全部案場</label>
       </header>
       <div class="panel">
         <table class="mgmt" id="station-table"></table>
@@ -149,12 +154,20 @@
         <p class="desc">整理自環境部「環境監測填寫範本」各資料辭典與官方代碼表（搭配 115/7/22 版範本）。</p>
       </header>
       <div class="panel rules">
-        <h2>官方文件下載</h2>
+        <h2>官方文件（可下載／內嵌預覽）</h2>
         <p>
           <a href="docs/unit_codes_v2.pdf" target="_blank" rel="noopener">檢測單位代碼表 V2（PDF）</a> ·
           <a href="docs/agency_codes_v1.pdf" target="_blank" rel="noopener">檢測機構代碼表 V1（PDF）</a>
-          <span class="note">（搭配 115/7/22 版環境監測填寫範本使用）</span>
+          <span class="note">（搭配 115/7/22 版環境監測填寫範本使用；手機瀏覽器若無法內嵌顯示，請用上方連結開啟）</span>
         </p>
+        <details>
+          <summary>內嵌預覽：檢測單位代碼表 V2</summary>
+          <embed class="pdf-frame" src="docs/unit_codes_v2.pdf#toolbar=1" type="application/pdf">
+        </details>
+        <details>
+          <summary>內嵌預覽：檢測機構代碼表 V1</summary>
+          <embed class="pdf-frame" src="docs/agency_codes_v1.pdf#toolbar=1" type="application/pdf">
+        </details>
         <p>官方空白範本：
           <a href="templates/water_template.xlsx" download="水質檢測資料填寫.xlsx">水質</a> ·
           <a href="templates/air_template.xlsx" download="空氣品質監測填寫.xlsx">空氣品質</a> ·
@@ -250,6 +263,22 @@
   </main>
 </div>
 
+<!-- 重複資料提示（同案場＋同測站＋同採樣日再次匯入） -->
+<div id="dup-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3>偵測到重複資料</h3>
+    <p class="modal-desc">本次匯入中，以下「測站＋採樣日」在目前案場已存在：</p>
+    <div id="dup-list" class="modal-list"></div>
+    <p class="note">「覆蓋」＝移除工作區中的舊資料、改用本次匯入；「略過」＝保留舊資料、本次匯入中重複的部分不匯入。
+      僅存在於歷史匯入紀錄的重複（工作區沒有）只提示、不會動到紀錄。</p>
+    <div class="form-actions">
+      <button class="btn" id="btn-dup-cancel">取消本次匯入</button>
+      <button class="btn" id="btn-dup-skip">略過重複</button>
+      <button class="btn primary" id="btn-dup-overwrite">覆蓋</button>
+    </div>
+  </div>
+</div>
+
 <!-- 匯出確認對話框（有缺漏欄位時） -->
 <div id="export-modal" class="modal-overlay hidden">
   <div class="modal">
@@ -270,24 +299,24 @@
 <div id="toast"></div>
 
 <!-- 函式庫（本地載入，無 CDN 依賴） -->
-<script src="lib/xlsx.full.min.js?v=5"></script>
+<script src="lib/xlsx.full.min.js?v=6"></script>
 <!-- 對照表資料庫 -->
-<script src="js/db/water_db.js?v=5"></script>
-<script src="js/db/air_db.js?v=5"></script>
-<script src="js/db/noise_db.js?v=5"></script>
-<script src="js/db/code_tables.js?v=5"></script>
+<script src="js/db/water_db.js?v=6"></script>
+<script src="js/db/air_db.js?v=6"></script>
+<script src="js/db/noise_db.js?v=6"></script>
+<script src="js/db/code_tables.js?v=6"></script>
 <!-- 共用引擎 -->
-<script src="js/core/xlsxwriter.js?v=5"></script>
-<script src="js/core/reader.js?v=5"></script>
-<script src="js/core/parser.js?v=5"></script>
-<script src="js/core/validator.js?v=5"></script>
-<script src="js/core/exporter.js?v=5"></script>
-<script src="js/core/storage.js?v=5"></script>
+<script src="js/core/xlsxwriter.js?v=6"></script>
+<script src="js/core/reader.js?v=6"></script>
+<script src="js/core/parser.js?v=6"></script>
+<script src="js/core/validator.js?v=6"></script>
+<script src="js/core/exporter.js?v=6"></script>
+<script src="js/core/storage.js?v=6"></script>
 <!-- 模組設定檔 -->
-<script src="js/configs/water.js?v=5"></script>
-<script src="js/configs/air.js?v=5"></script>
-<script src="js/configs/noise.js?v=5"></script>
+<script src="js/configs/water.js?v=6"></script>
+<script src="js/configs/air.js?v=6"></script>
+<script src="js/configs/noise.js?v=6"></script>
 <!-- 介面 -->
-<script src="js/app.js?v=5"></script>
+<script src="js/app.js?v=6"></script>
 </body>
 </html>

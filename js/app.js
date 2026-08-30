@@ -15,6 +15,21 @@
     if ($("#mod-noise").checked) list.push("noise");
     return list;
   }
+  /* 目前案場可用的測站：該案場的＋全域（無案場歸屬）的 */
+  function stationsForActive() {
+    return state.stations.filter(function (s) {
+      return !s.projectCode || s.projectCode === state.activeProjectCode;
+    });
+  }
+  /* 重複判定鍵：模組＋測站＋採樣日（任一缺就不列入判定） */
+  function recKeyOf(rec) {
+    var cfg = cfgOf(rec.module);
+    if (!cfg || !rec.f) return null;
+    var site = rec.f[cfg.stationField] ? rec.f[cfg.stationField].v : null;
+    var date = rec.f.dateStart ? rec.f.dateStart.v : null;
+    if (!site || !date) return null;
+    return rec.module + "|" + site + "|" + date;
+  }
 
   var state = {
     files: [],            // {name}
@@ -187,21 +202,82 @@
       });
     });
     return chain.then(function () {
-      // 每張工作表由第一個 detectSheet 命中的已勾選模組解析
+      // 每張工作表由第一個 detectSheet 命中的已勾選模組解析（測站記憶限目前案場＋全域）
       var jobs = enabled.map(function (mid) {
-        return { config: cfgOf(mid), ctx: { stations: state.stations, tables: state.tables[mid] } };
+        return { config: cfgOf(mid), ctx: { stations: stationsForActive(), tables: state.tables[mid] } };
       });
       var res = C.parser.parseFilesMulti(models, jobs);
-      state.records = state.records.concat(res.records);
-      state.warnings = state.warnings.concat(res.warnings);
-      ok.forEach(function (f) { state.files.push({ name: f.name }); });
-      refreshConvert();
-      saveDraft();
-      toast("已解析 " + res.records.length + " 個監測點");
+      // 重複偵測：同案場＋同測站＋同採樣日
+      return checkDuplicates(res.records).then(function (dups) {
+        if (!dups.total) { commitImport(res, ok, res.records); return; }
+        state.pendingImport = { res: res, files: ok, dups: dups };
+        openDupModal(dups);
+      });
     }).catch(function (e) {
       toast("讀取失敗：" + e.message, true);
     });
   }
+
+  function commitImport(res, files, records) {
+    var skipped = res.records.length - records.length;
+    state.records = state.records.concat(records);
+    state.warnings = state.warnings.concat(res.warnings);
+    files.forEach(function (f) { state.files.push({ name: f.name }); });
+    refreshConvert();
+    saveDraft();
+    toast("已解析 " + records.length + " 個監測點" + (skipped > 0 ? "（略過 " + skipped + " 個重複）" : ""));
+  }
+
+  /* ---- 重複資料偵測：對照目前工作區與同案場的歷史匯入紀錄 ---- */
+  function checkDuplicates(newRecords) {
+    var wsKeys = {};
+    state.records.forEach(function (r) { var k = recKeyOf(r); if (k) wsKeys[k] = true; });
+    return C.storage.getAll("imports").then(function (imports) {
+      var histKeys = {};
+      (imports || []).forEach(function (im) {
+        if ((im.projectCode || null) !== (state.activeProjectCode || null)) return;
+        if (im.id === state.importId) return;   // 目前工作區的草稿本身
+        (im.records || []).forEach(function (r) {
+          var k = recKeyOf(r);
+          if (k && !histKeys[k]) histKeys[k] = new Date(im.ts).toLocaleDateString("zh-TW");
+        });
+      });
+      var inWs = [], inHist = [];
+      newRecords.forEach(function (r) {
+        var k = recKeyOf(r);
+        if (!k) return;
+        if (wsKeys[k]) inWs.push(r);
+        else if (histKeys[k]) inHist.push({ rec: r, when: histKeys[k] });
+      });
+      return { total: inWs.length + inHist.length, inWs: inWs, inHist: inHist };
+    });
+  }
+
+  function openDupModal(dups) {
+    var list = $("#dup-list");
+    list.innerHTML = "";
+    var t = el("table", "mgmt");
+    t.innerHTML = "<tr><th>模組</th><th>測站</th><th>採樣日</th><th>已存在於</th></tr>";
+    dups.inWs.forEach(function (r) {
+      var tr = el("tr");
+      tr.appendChild(el("td", null, cfgOf(r.module).label));
+      tr.appendChild(el("td", null, r.f[cfgOf(r.module).stationField].v));
+      tr.appendChild(el("td", null, r.f.dateStart.v));
+      tr.appendChild(el("td", null, "目前工作區"));
+      t.appendChild(tr);
+    });
+    dups.inHist.forEach(function (d) {
+      var tr = el("tr");
+      tr.appendChild(el("td", null, cfgOf(d.rec.module).label));
+      tr.appendChild(el("td", null, d.rec.f[cfgOf(d.rec.module).stationField].v));
+      tr.appendChild(el("td", null, d.rec.f.dateStart.v));
+      tr.appendChild(el("td", null, "匯入紀錄（" + d.when + "，僅提示）"));
+      t.appendChild(tr);
+    });
+    list.appendChild(t);
+    $("#dup-modal").classList.remove("hidden");
+  }
+  function closeDupModal() { $("#dup-modal").classList.add("hidden"); }
 
   /* ================= 預覽表 ================= */
   /* records 依模組分組（保持出現順序） */
@@ -487,7 +563,47 @@
       state.activeProjectCode = this.value || null;
       C.storage.setSetting("activeProject", state.activeProjectCode);
       updateStatusBar();
+      renderHistoryView();   // 匯入紀錄與測站清單跟著案場切換
+      renderStationsView();
+      renderProjectsView();
     });
+
+    // 重複資料對話框
+    $("#btn-dup-cancel").addEventListener("click", function () {
+      state.pendingImport = null;
+      closeDupModal();
+      toast("已取消本次匯入");
+    });
+    $("#btn-dup-skip").addEventListener("click", function () {
+      var p = state.pendingImport;
+      if (!p) { closeDupModal(); return; }
+      var wsKeys = {};
+      p.dups.inWs.forEach(function (r) { wsKeys[recKeyOf(r)] = true; });
+      var keep = p.res.records.filter(function (r) { return !wsKeys[recKeyOf(r)]; });
+      state.pendingImport = null;
+      closeDupModal();
+      commitImport(p.res, p.files, keep);
+    });
+    $("#btn-dup-overwrite").addEventListener("click", function () {
+      var p = state.pendingImport;
+      if (!p) { closeDupModal(); return; }
+      var newKeys = {};
+      p.dups.inWs.forEach(function (r) { newKeys[recKeyOf(r)] = true; });
+      var removed = 0;
+      state.records = state.records.filter(function (r) {
+        var k = recKeyOf(r);
+        if (k && newKeys[k]) { removed++; return false; }
+        return true;
+      });
+      state.pendingImport = null;
+      closeDupModal();
+      commitImport(p.res, p.files, p.res.records);
+      toast("已解析 " + p.res.records.length + " 個監測點，覆蓋 " + removed + " 個工作區舊資料");
+    });
+
+    // 匯入紀錄／測站管理的「顯示全部案場」開關
+    $("#hist-show-all").addEventListener("change", renderHistoryView);
+    $("#station-show-all").addEventListener("change", renderStationsView);
 
     // 設定/備份
     $("#btn-backup").addEventListener("click", function () {
@@ -573,7 +689,7 @@
       var name = rec.f[cfgOfRec(rec).stationField].v;
       if (name === null || name === undefined || String(name).trim() === "") return Promise.resolve();
       var existing = state.stations.find(function (s) { return s.name === name; });
-      var st = existing || { name: name, aliases: [] };
+      var st = existing || { name: name, aliases: [], projectCode: state.activeProjectCode };
       if (rec.f.coordSys.v != null) st.coordSys = rec.f.coordSys.v;
       if (rec.f.x.v != null) st.x = rec.f.x.v;
       if (rec.f.y.v != null) st.y = rec.f.y.v;
@@ -620,19 +736,28 @@
     if (!box) return;
     C.storage.getAll("imports").then(function (rows) {
       box.innerHTML = "";
-      if (!rows || !rows.length) {
-        box.appendChild(el("div", "empty-note", "尚無匯入紀錄，到「資料轉換」上傳 raw data 即會自動建立。"));
+      var showAll = $("#hist-show-all") && $("#hist-show-all").checked;
+      rows = (rows || []).filter(function (r) {
+        return showAll || (r.projectCode || null) === (state.activeProjectCode || null);
+      });
+      if (!rows.length) {
+        box.appendChild(el("div", "empty-note", showAll
+          ? "尚無匯入紀錄，到「資料轉換」上傳 raw data 即會自動建立。"
+          : "目前案場（" + (state.activeProjectCode || "未選") + "）尚無匯入紀錄；可勾「顯示全部案場」查看其他案場。"));
         return;
       }
       rows.sort(function (a, b) { return b.ts - a.ts; });
       var t = el("table", "mgmt");
-      t.innerHTML = "<tr><th>時間</th><th>案場</th><th>檔案</th><th>監測點</th><th>狀態</th><th></th></tr>";
+      t.innerHTML = "<tr><th>時間</th><th>案場</th><th>檔案</th><th>監測點</th><th>資料列數</th><th>狀態</th><th></th></tr>";
       rows.forEach(function (r) {
         var tr = el("tr");
         tr.appendChild(el("td", null, new Date(r.ts).toLocaleString("zh-TW")));
         tr.appendChild(el("td", null, r.projectCode || "—"));
         tr.appendChild(el("td", null, (r.files || []).join("、")));
         tr.appendChild(el("td", "num", String((r.records || []).length)));
+        tr.appendChild(el("td", "num", String((r.records || []).reduce(function (s, x) {
+          return s + (x.items ? x.items.length : 0);
+        }, 0))));
         var tdS = el("td");
         var badge = el("span", "hist-status " + (r.status === "exported" ? "ok" : "draft"),
           r.status === "exported" ? "已匯出" : (r.missingCount ? "缺 " + r.missingCount + " 欄" : "未匯出"));
@@ -670,8 +795,16 @@
   function renderStationsView() {
     var t = $("#station-table");
     if (!t) return;
-    t.innerHTML = "<tr><th>測站名稱（申報用）</th><th>座標系統</th><th>X</th><th>Y</th><th>上次時間(迄)</th><th>別名（raw data 名稱，逗號分隔）</th><th></th></tr>";
-    state.stations.forEach(function (st) { t.appendChild(stationRow(st)); });
+    var showAll = $("#station-show-all") && $("#station-show-all").checked;
+    t.innerHTML = "<tr><th>測站名稱（申報用）</th><th>案場</th><th>座標系統</th><th>X</th><th>Y</th><th>上次時間(迄)</th><th>別名（raw data 名稱，逗號分隔）</th><th></th></tr>";
+    var list = showAll ? state.stations : stationsForActive();
+    list.forEach(function (st) { t.appendChild(stationRow(st)); });
+    if (!list.length) {
+      var tr = el("tr"), td = el("td");
+      td.colSpan = 8;
+      td.appendChild(el("div", "empty-note", "此案場尚無測站（匯出成功時會自動建立）"));
+      tr.appendChild(td); t.appendChild(tr);
+    }
   }
   function stationRow(st) {
     var tr = el("tr");
@@ -684,6 +817,12 @@
       return inp;
     }
     var iName = tdInput(st.name);
+    // 案場歸屬（空＝全域，所有案場可用）
+    var tdProj = el("td"), selProj = el("select");
+    selProj.appendChild(new Option("（全域）", ""));
+    state.projects.forEach(function (p) { selProj.appendChild(new Option(p.code, p.code)); });
+    selProj.value = st.projectCode || "";
+    tdProj.appendChild(selProj); tr.appendChild(tdProj);
     var tdSys = el("td"), sel = el("select");
     sel.appendChild(new Option("—", ""));
     Object.keys(DB.water.coordSystems).forEach(function (code) {
@@ -702,6 +841,7 @@
       if (iT.value.trim() && lastT === null) { toast("上次時間(迄)格式錯誤，請用 HH:MM", true); return; }
       var obj = {
         name: name,
+        projectCode: selProj.value || null,
         coordSys: sel.value ? Number(sel.value) : null,
         x: iX.value.trim() ? Number(iX.value) : null,
         y: iY.value.trim() ? Number(iY.value) : null,
@@ -752,6 +892,7 @@
         state.activeProjectCode = p.code;
         C.storage.setSetting("activeProject", p.code);
         renderProjectSelect(); renderProjectsView(); updateStatusBar();
+        renderHistoryView(); renderStationsView();
       });
       var bEdit = el("button", "btn small", "編輯");
       bEdit.addEventListener("click", function () { openProjectForm(p); });
