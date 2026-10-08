@@ -24,12 +24,15 @@
   var RE_EXCL_COL_WEAK = /單位$|日期|時間|頁次|備註|削減率|編號/;   // 「監測日期：115.01.05」這類鍵值或整列標題不算
   var RE_EXCL_EMIT = /排放(?!濃度|速率|管道|口)/;      // 「排放標準」OCR 殘缺（排放 BR）亦排除
   var RE_EXCL_ROW = /標準|限值|基準|法規|管制值/;
+  // 待填表格中不是「本季數值」的列（備註、說明、檢測日期、天氣、歷次平均…），不填
+  var RE_TPL_SKIP_ROW = /^(備註|附註|註(?=$|[:：\d一二三四五六七八九十、.)）])|說明|資料來源|(檢測|監測|採樣|量測|分析)?日期|(檢測|監測|採樣|量測)時間|天氣|氣象|(執行|檢測|監測|委託|採樣|分析)(單位|人員)|(採樣|檢測|分析)人員|歷次|歷年|累計|合計|小計|總計|是否)/;
   var RE_KV_STATION = /^(檢測|監測|採樣|量測)(位置|地點|點位|站名|站)$|^(測站|測點|監測點|採樣點|監測站)(名稱)?$|^站名$/;
   var RE_KV_ID = /^(現場|樣品|採樣)?[編綸給]號$|^(現場|樣品)(編號|代號)$/;
   var RE_KV_DATE = /^(檢測|監測|採樣|量測)(日期|時間)|^日期/;
   var RE_ID_CAPTURE = /(現場|樣品)\s*[編綸給]\s*號\s*[:]?\s*([A-Za-z0-9][A-Za-z0-9\-_.]{3,})/;
   var RE_DATE_KEY = /(監測|檢測|採樣|量測)\s*(日期|時間)/;
   var RE_PERIOD = /\d{2,4}\s*年.*季|\d{2,4}\s*[Qq][1-4]|\d{2,4}\s*年\s*\d{1,2}\s*月|\d{2,3}\.\d{1,2}\s*[~\-至]\s*\d{2,3}\.\d{1,2}/;
+  var RE_PERIOD_STRIP = /(民國)?\s*\d{2,4}\s*年\s*(度)?\s*(第\s*[一二三四1-4]\s*季|[上下]半年|\d{1,2}\s*(~|-|至)?\s*\d{0,2}\s*月)?|\d{2,4}\s*[Qq][1-4]|第\s*[一二三四1-4]\s*季/g;
   var RE_TITLE_CUT = /空氣品質|噪音|振動|水質|河川|地下水|放流水|監測|歷次|調查|彙整|結果|檢測|測定|分析/;
   var RE_STATION_HEADER = /測站|站名|地點|位置|監測點|測點|採樣點|station/i;
   var RE_GENERIC_HEADER = /項目|測項|監測|檢測|單位|季別|數值|結果|日期|時間|名稱|備註|類別|方法|頻率|地點|位置|測站|站名|編號|說明|合計|平均|最大|最小|標準|限值|噪音|振動|空氣|水質|品質|狀況|天氣|氣象|條件|風向|風速|溫度|濕度|溼度|單位|說明|合格|附註|註|其他|計畫|委託|執行|頁|濃度|污染|值$|含量|數據|資料|紀錄|記錄|樣品|採樣|分析|檢驗|量測|測定|報告|總表|表$|統計|季$|月$|年$|合計|小計|總計|範圍|規定/;
@@ -133,6 +136,12 @@
       else if (dict.isFiller(X.n)) X.kind = "filler";
       else {
         X.pv = dict.parseValue(X.text);
+        // OCR 把小數點讀成冒號（0:5、0:052）：不可能是時刻者改以小數判讀（信心度降為需核對）
+        var cm = !X.pv.ok && /^(\d{1,3})\s*[:：]\s*(\d{1,4})$/.exec(X.n);
+        if (cm && (cm[2].length !== 2 || Number(cm[1]) > 24)) {
+          var pvc = dict.parseValue(cm[1] + "." + cm[2]);
+          if (pvc.ok) { X.pv = pvc; X.pvGuess = true; }
+        }
         if (!X.pv.ok && /\d/.test(X.n) && X.n.length <= 24 && !/^0\d/.test(X.n) &&
           !dict.findItems(X.n, { weak: true }).length) {               // 「0 ppb」「03 (ppm)」是 O3 表頭
           var vu = dict.parseValueUnit(X.text);
@@ -405,8 +414,24 @@
   }
 
   /* ---------------- 表格層級分析 ---------------- */
+  /* 項目欄內 OCR 殘缺的項目標籤（「03」＝O3）：只在同一欄已有 ≥2 個項目標籤時採用 */
+  var RE_ITEM_FRAG = /^([0OoQ]3)(?=$|[\s(（])/;
+  function fixItemFragments(T) {
+    var colItems = {};
+    T.cells.forEach(function (X) {
+      if (X.kind === "label" && X.c0 === X.c1 && feat(X).items.length) colItems[X.c0] = (colItems[X.c0] || 0) + 1;
+    });
+    T.cells.forEach(function (X) {
+      if (X.kind !== "label" || X.c0 !== X.c1 || (colItems[X.c0] || 0) < 2) return;
+      var f = feat(X);
+      if (f.items.length || f.stat) return;
+      var m = RE_ITEM_FRAG.exec(compact(X.n));
+      if (m) f.items = [{ code: "O3", start: 0, end: m[1].length, len: m[1].length, exact: false, generic: false, weak: true }];
+    });
+  }
   function analyzeTable(T) {
     var dict = D();
+    fixItemFragments(T);
     T.unitCols = [];
     T.kvStations = [];
     T.sampleIds = [];
@@ -458,6 +483,19 @@
         if (d3) T.dates.push({ d: d3, w: 1 });
       }
     });
+    // 表格內沒有日期：改用表名／頁面文字中的「檢測日期：115.08.15」（只認監測/檢測/採樣/量測日期，
+    // 不採用報告日期、收樣日期、文件生效日期）
+    if (!T.dates.length) {
+      var ctxLines = [];
+      if (T.table.title) ctxLines.push(T.table.title);
+      (T.table.context || []).forEach(function (l) { var t = typeof l === "string" ? l : (l && l.text) || ""; if (t) ctxLines.push(t); });
+      for (var li = 0; li < ctxLines.length; li++) {
+        var ln = dict.norm(ctxLines[li]), at2 = ln.search(RE_DATE_KEY);
+        if (at2 < 0) continue;
+        var d4 = dict.parseRocDate(ln.slice(at2));
+        if (d4) { T.dates.push({ d: d4, w: 0 }); break; }
+      }
+    }
     var nc = Object.keys(colItems).length, nr = Object.keys(rowItems).length;
     T.orient = (nc >= 2 && nc > nr) ? "cols" : (nr >= 2 && nr > nc) ? "rows" : "dist";
     T.sampleIds = uniq(T.sampleIds.filter(Boolean));
@@ -723,7 +761,8 @@
         station: null, stationRaw: st ? st.raw : null, stationKey: null, stationVia: st ? st.via : null, pointNo: null,
         value: X.pv.value, num: X.pv.num, cmp: X.pv.cmp, nd: !!X.pv.nd, decimals: X.pv.decimals,
         date: T.date ? dict.formatDate(T.date) : null,
-        conf: X.cell.conf === undefined ? null : X.cell.conf, bbox: X.cell.bbox || null,
+        conf: X.pvGuess ? Math.min(typeof X.cell.conf === "number" ? X.cell.conf : 50, 50) : (X.cell.conf === undefined ? null : X.cell.conf),
+        bbox: X.cell.bbox || null,
         source: st ? st.source : "point", where: whereOf(table, X), labels: labelSummary(rl, cl),
         ref: X.cell.ref || null
       };
@@ -991,7 +1030,9 @@
       return null;
     }
     s = s.slice(0, cut).replace(/[\s:：,，、\-–_()]+$/g, "").replace(/^[\s:：,，、\-–_()]+/g, "");
-    if (s.length < 2 || s.length > 24 || !D().hasCJK(s)) return null;
+    // 「115年第三季空氣品質…」：季別／年月不是測站
+    s = s.replace(RE_PERIOD_STRIP, "").replace(/^[\s:：,，、\-–_()]+|[\s:：,，、\-–_()]+$/g, "");
+    if (s.length < 2 || s.length > 24 || !D().hasCJK(s) || D().parseRocDate(s)) return null;
     if (known.length) {
       var b = bestKnown(s);
       if (b) return b.name;
@@ -1021,6 +1062,7 @@
       var T = prepTable(table, "template", warn);
       analyzeTable(T);
       var titleSt = tableTitleStation(table, known, bestKnown);
+      var tout = [];        // 本表的空格（最後再依列標題過濾）
       var kvSt = uniq(T.kvStations.map(function (V) { return V.n; }));
       var title = table.title || ((table.context || [])[0]) || ("表格 " + (ti + 1));
       if (typeof title !== "string") title = String(title.text || "");
@@ -1030,6 +1072,10 @@
         if (!rl.length && !cl.length) return;
         if (exclusionOf(T, X, rl, cl)) return;
         if (isTimeCell(rl) || isTimeCell(cl)) return;
+        // 列標題為備註／說明／日期／歷次平均等，或只有長註記 → 不是要填數值的列
+        var rlLabels = rl.filter(function (L) { return L.X.kind === "label"; });
+        if (rl.some(function (L) { return (L.X.kind === "label" || L.X.kind === "note") && RE_TPL_SKIP_ROW.test(compact(L.X.n)); })) return;
+        if (!rlLabels.length && rl.some(function (L) { return L.X.kind === "note"; })) return;
         var all = rl.concat(cl);
         var ih = itemFrom(T, rl, cl, all);
         if (!ih) return;
@@ -1078,7 +1124,16 @@
           .sort(function (a, b) { return b.dist - a.dist; }).map(function (L) { return L.X.n; });
         var rowLabels = rl.filter(function (L) { return L.X.kind === "label"; })
           .sort(function (a, b) { return b.dist - a.dist; }).map(function (L) { return L.X.n; });
-        out.push({
+        // 列標題是季別或測站（以「列」為單位填寫的表格）
+        var rowKey = rlLabels.some(function (L) {
+          if (L === ih.L) return false;
+          var lf = feat(L.X);
+          if (lf.period || L.X.kvStation) return true;
+          if (lf.items.length || lf.stat || lf.unit || lf.time) return false;
+          if (knownOn) { var kb2 = bestKnown(L.X.n); return !!(kb2 && kb2.sim >= 0.75); }
+          return stationish(L.X);
+        });
+        tout.push({
           id: doc.id + "|" + table.id + "|" + X.r0 + "," + X.c0,
           docId: doc.id, docName: doc.name, tableId: table.id, tableIndex: ti,
           r: X.r0, c: X.c0, r1: X.r1, c1: X.c1, ref: X.cell.ref === undefined ? null : X.cell.ref,
@@ -1086,8 +1141,22 @@
           station: station, stationKey: station ? dict.norm(station) : null, stationFrom: stSrc,
           period: period, periodInfo: periodInfo,
           headers: headers, rowLabels: rowLabels, title: title,
-          label: title + "｜" + headers.join(" ") + (rowLabels.length ? "｜" + rowLabels.join(" ") : "")
+          label: title + "｜" + headers.join(" ") + (rowLabels.length ? "｜" + rowLabels.join(" ") : ""),
+          _rowKey: rowKey,
+          // 彙整列：列標題只有統計別（平均值、最大值…），沒有項目／季別
+          _aggRow: !rowKey && rlLabels.some(function (L) {
+            if (L === ih.L) return false;
+            var lf = feat(L.X);
+            return !!lf.stat && !lf.items.length && !lf.period;
+          })
         });
+      });
+      // 各列以季別／測站為列標題的表格：其他的彙整列（歷次平均值、最大值等）不填
+      var keyed = tout.some(function (x) { return x._rowKey; });
+      tout.forEach(function (x) {
+        var keep = !(keyed && x._aggRow);
+        delete x._rowKey; delete x._aggRow;
+        if (keep) out.push(x);
       });
     });
     return out;

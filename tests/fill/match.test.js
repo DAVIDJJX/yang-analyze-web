@@ -29,6 +29,31 @@ function slot(o) {
 }
 const run1 = (s, facts, opts) => M.run([s], facts, opts)[0];
 
+T.test("OCR 低信心度／負值的單一來源 → 需核對；文字來源不受影響", () => {
+  const low = run1(slot({}), [fact({ value: "0.0111", conf: 38 })]);
+  assert.deepStrictEqual([low.value, low.status], ["0.0111", "conflict"]);
+  assert.ok(/信心度 38/.test(low.note), low.note);
+  const neg = run1(slot({ item: "CO", unit: "ppm" }), [fact({ item: "CO", value: "-0.4", conf: 92 })]);
+  assert.deepStrictEqual([neg.value, neg.status], ["-0.4", "conflict"]);
+  const txt = run1(slot({}), [fact({ value: "0.003", conf: null })]);
+  assert.strictEqual(txt.status, "auto");
+});
+
+T.test("無測站數值過多（逐時數列）不要求逐點對應；文件字串為 Object 原型成員也不出錯", () => {
+  const many = [];
+  for (let i = 1; i <= 60; i++) many.push(fact({ station: null, pointNo: i, value: "0.00" + (i % 9 + 1) }));
+  const a = run1(slot({}), many);
+  assert.strictEqual(a.status, "missing");
+  assert.ok(/無法判斷/.test(a.note), a.note);
+  const few = run1(slot({}), many.slice(0, 4));
+  assert.strictEqual(few.status, "mapping");
+  ["constructor", "__proto__", "toString", "hasOwnProperty"].forEach((nm) => {
+    const r = M.run([slot({ station: nm, stationKey: nm }), slot({})], [fact({ station: nm }), fact({ value: "0.002" })], { aliases: {} });
+    assert.strictEqual(r.length, 2, nm);
+    M.unmatchedGroups([slot({})], [fact({ station: nm, item: "NO2" })], r);
+  });
+});
+
 T.test("consistent：規格範例", () => {
   assert.ok(M.consistent("0.001", { num: 0.0011, decimals: 5 }));          // 1.10 ppb
   assert.ok(M.consistent("0.012", { num: 0.0115, decimals: 5 }));          // 11.50 ppb（邊界）

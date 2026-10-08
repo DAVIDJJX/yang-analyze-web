@@ -487,6 +487,53 @@ T.test("範本表內「監測位置：…」列與中文編號表名", () => {
   assert.strictEqual(s3[0].station, "南港社區活動中心");
 });
 
+T.test("範本非數值列（備註、檢測日期、歷次平均值、註：…）不填；表名季別不當測站", () => {
+  const s = X.slots(doc("tr", [grid("t0", [
+    ["檢測季別", "SO2\n小時平均值(ppm)", "PM10\n24小時平均值(μg/m3)"],
+    ["115年第三季", "", ""],
+    ["備註", "", ""],
+    ["歷次平均值", "", ""],
+    ["歷次最大值", "", ""],
+    ["檢測日期", "", ""],
+    ["天氣狀況", "", ""],
+    ["說明", "", ""],
+    ["執行單位", "", ""]
+  ], { title: "表2.1-1 東湖空氣品質歷次調查結果彙整" })], "template"), { stations: KNOWN });
+  assert.deepStrictEqual(s.map((x) => x.r + "/" + x.item + "/" + x.station), ["1/SO2/東湖", "1/PM10/東湖"]);
+  const s2 = X.slots(doc("tr2", [grid("t0", [
+    ["測站名稱", "SO2", "NO2"],
+    ["^", "小時平均值(ppm)", "小時平均值(ppm)"],
+    ["東湖", "", ""],
+    ["西林", "", ""],
+    ["空氣品質標準", "0.075", "0.1"],
+    ["註：本表由示範顧問公司彙整。", "", ""]
+  ], { title: "表2 115年第三季空氣品質監測結果" })], "template"), {});
+  assert.deepStrictEqual(s2.map((x) => x.r + "/" + x.station), ["2/東湖", "2/東湖", "3/西林", "3/西林"]);
+  const s3 = X.slots(doc("tr3", [grid("t0", [["項目", "SO2"], ["小時平均值(ppm)", ""]], { title: "表2 115年第三季空氣品質監測結果" })], "template"), {});
+  assert.strictEqual(s3[0].station, null);
+});
+
+T.test("OCR 誤認：項目欄「03」＝O3、「$02」＝SO2、Hg/m3 不是汞、小數點讀成冒號、監測位置.:", () => {
+  const d = doc("ocr", [grid("p1t0", [
+    ["項目", "單位", "測值"], ["$02", "ppm", "0.003"], ["NO2", "ppm", "0.011"], ["03", "ppm", "0.045"],
+    ["CO", "ppm", "0:5"], ["PM10", "Hg/m3", "28"]
+  ], { page: 1, context: ["監測位置.: 西林"] })], "raw", "scan.pdf");
+  const f = X.facts(d, { stations: KNOWN });
+  assert.deepStrictEqual(f.map((x) => x.item + "/" + x.value + "/" + x.station),
+    ["SO2/0.003/西林", "NO2/0.011/西林", "O3/0.045/西林", "CO/0.5/西林", "PM10/28/西林"]);
+  assert.ok(f[3].conf <= 50, "冒號小數需核對");
+  assert.strictEqual(f[4].unit, "ug/m3");
+});
+
+T.test("表格內無日期時採用頁面文字「檢測日期：…」（不採用報告日期）", () => {
+  const f = X.facts(doc("dt", [grid("p1t0", [["項目", "測值"], ["SO2 小時平均值(ppm)", "0.003"]],
+    { page: 1, context: ["報告日期：115.09.30", "檢測日期：115.05.12~115.05.13", "監測位置：西林"] })], "raw", "q2.pdf"), { stations: KNOWN });
+  assert.strictEqual(f[0].date, "115.05.12");
+  const g = X.facts(doc("dt2", [grid("p1t0", [["項目", "測值"], ["SO2 小時平均值(ppm)", "0.003"]],
+    { page: 1, context: ["報告日期：115.09.30", "生效日期：115.01.01"] })], "raw", "x.pdf"), { stations: KNOWN });
+  assert.strictEqual(g[0].date, null);
+});
+
 T.test("超大稀疏表格（宣告 nRows 很大）不爆記憶體", () => {
   const t = { id: "huge", nRows: 1e7, nCols: 5000, cells: [
     { r0: 0, c0: 0, text: "項目" }, { r0: 0, c0: 1, text: "白河新村" },

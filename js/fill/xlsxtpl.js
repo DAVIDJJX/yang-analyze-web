@@ -93,7 +93,12 @@
       return XL.read(u8, opts);
     } catch (e) {
       var msg = String(e && e.message || e);
-      if (/password|encrypt/i.test(msg)) throw xlError("Excel 檔有密碼保護，請先移除密碼再上傳");
+      var isZip = u8 && u8[0] === 0x50 && u8[1] === 0x4B;
+      // 有密碼的 .xlsx 實際是 OLE（CFB）容器；ZIP 檔出現「加密」字樣多半是檔案損毀
+      if (/password|encrypt/i.test(msg) && !isZip) throw xlError("Excel 檔有密碼保護，請先移除密碼再上傳");
+      if (isZip || /compressed size|crc|inflate|corrupt|unexpected end/i.test(msg)) {
+        throw xlError("試算表檔案損毀或不完整，無法讀取（" + msg + "）；請用 Excel 開啟確認後另存新檔再上傳");
+      }
       throw xlError("無法讀取試算表（" + msg + "）");
     }
   }
@@ -327,6 +332,9 @@
           model.warnings.push(model.kind === "csv" ? "CSV 檔輸出時沿用 CSV 格式（無框線、字型）"
             : "此格式（." + (model.ext || model.kind) + "）輸出時將以 SheetJS 重新寫出，框線、字型、底色等格式可能遺失；建議先另存為 .xlsx 再上傳");
         }
+        // 輸出副檔名（與 fill() 實際寫出的格式一致，供畫面顯示檔名）
+        if (model.format === "ooxml") model.outExt = /^(xlsm|xltm)$/.test(model.kind) ? "xlsm" : "xlsx";
+        else model.outExt = model.kind === "csv" ? "csv" : model.kind === "xlsb" ? "xlsb" : model.kind === "ods" ? "ods" : "xls";
         var blanks = 0;
         model.tables.forEach(function (t) { t.cells.forEach(function (c) { if (!c.text) blanks++; }); });
         model.info = model.sheets.length + " 張工作表、" + model.tables.length + " 個表格區塊" +
@@ -691,7 +699,8 @@
 
   /** fills → [{sheet, addr, value, mark}]（最後一筆為準） */
   function resolveFills(model, fills, warnings) {
-    var byId = {}, out = [], seen = {};
+    // 鍵為工作表名稱等文件內容：用無原型物件（工作表名為「constructor」等也不出錯）
+    var byId = Object.create(null), out = [], seen = Object.create(null);
     model.tables.forEach(function (t) { byId[t.id] = t; });
     (fills || []).forEach(function (f) {
       var t = byId[f.tableId];
@@ -730,7 +739,7 @@
       st.wbText = r[0]; st.relsText = r[1];
       st.wbDoc = parseXml(st.wbText, wbPart);
       st.relsDoc = st.relsText ? parseXml(st.relsText, relsPart) : null;
-      var rels = {}, relEls = st.relsDoc ? st.relsDoc.getElementsByTagName("*") : [];
+      var rels = Object.create(null), relEls = st.relsDoc ? st.relsDoc.getElementsByTagName("*") : [];
       st.relEls = [];
       for (var i = 0; i < relEls.length; i++) {
         var e = relEls[i];
@@ -740,7 +749,7 @@
         rels[e.getAttribute("Id")] = { type: e.getAttribute("Type") || "", target: tgt, el: e };
       }
       st.rels = rels;
-      st.sheetPart = {};
+      st.sheetPart = Object.create(null);
       var sheets = st.wbDoc.getElementsByTagName("*");
       for (var j = 0; j < sheets.length; j++) {
         var s = sheets[j];
@@ -759,7 +768,7 @@
       st.styles = stylesText ? new Styles(parseXml(stylesText, st.stylesPart)) : null;
       if (!st.styles) warnings.push("Excel 檔缺少樣式表，數值將以預設格式寫入");
       // 依工作表分組
-      var bySheet = {}, order = [];
+      var bySheet = Object.create(null), order = [];
       list.forEach(function (f) {
         if (!bySheet[f.sheet]) { bySheet[f.sheet] = []; order.push(f.sheet); }
         bySheet[f.sheet].push(f);
@@ -769,7 +778,7 @@
       var parts = Object.keys(st.sheetPart).map(function (n) { return st.sheetPart[n]; }).filter(function (p) { return zip.has(p); });
       return Promise.all(parts.map(function (p) { return zip.text(p).then(function (t) { return [p, t]; }); }));
     }).then(function (pairs) {
-      var texts = {}, hasFormula = !!st.calcPart;
+      var texts = Object.create(null), hasFormula = !!st.calcPart;
       pairs.forEach(function (pt) { texts[pt[0]] = pt[1]; if (/<(\w+:)?f[\s>\/]/.test(pt[1])) hasFormula = true; });
       var changes = {}, formulaRemoved = false;
       st.order.forEach(function (name) {

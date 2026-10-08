@@ -515,6 +515,7 @@
       res.ifds.push(tags);
       var np = ifd + 2 + cnt * 12;
       ifd = np + 4 <= L ? dv.getUint32(np, le) : 0;
+      if (ifd > 0 && ifd + 2 > L) warnings.push("TIFF：第 " + (res.ifds.length + 1) + " 頁起的頁面目錄超出檔案範圍（檔案可能被截斷），只讀到前 " + res.ifds.length + " 頁。");
     }
     return res;
   }

@@ -201,6 +201,16 @@ test("write 預設時間戳、重複名稱與空名稱錯誤", async function ()
   await rejectsZh(Z.write([{ name: "", data: "1" }]), /名稱/);
 });
 
+test("解壓縮上限：宣告大小造假（ZIP 炸彈）時中止並回報中文錯誤", async function () {
+  var z = await Z.write([{ name: "word/document.xml", data: new Uint8Array(3 * 1048576) }]);
+  // 把中央目錄的「解壓後大小」改成 1000 位元組
+  for (var i = z.length - 22; i >= 0; i--) {
+    if (z[i] === 0x50 && z[i + 1] === 0x4b && z[i + 2] === 1 && z[i + 3] === 2) { new DataView(z.buffer, z.byteOffset).setUint32(i + 24, 1000, true); break; }
+  }
+  var zip = await Z.read(z);
+  await rejectsZh(zip.get("word/document.xml"), /宣告的大小/);
+});
+
 test("空 ZIP 可寫可讀", async function () {
   var out = await Z.write([]);
   assert.strictEqual(out.length, 22);

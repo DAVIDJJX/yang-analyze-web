@@ -142,6 +142,7 @@
           <button class="btn" id="fill-zip-btn" disabled>全部下載（.zip）</button>
         </div>
       </div>
+      <div class="fill-sticky" id="fill-sticky" hidden></div>
     </section>
 
     <!-- ---- 匯入紀錄 ---- -->
@@ -358,8 +359,9 @@
 
 <!-- 填表核對：原始資料辨識結果檢視 -->
 <div id="fill-inspect-modal" class="modal-overlay hidden">
-  <div class="modal fill-inspect">
-    <h3>辨識結果：<span id="fill-inspect-title"></span></h3>
+  <div class="modal fill-inspect" role="dialog" aria-modal="true" aria-labelledby="fill-inspect-h">
+    <h3 id="fill-inspect-h"><span><span id="fill-inspect-kind">辨識結果</span>：<span id="fill-inspect-title"></span></span>
+      <button type="button" class="fill-inspect-x" id="fill-inspect-x" aria-label="關閉">✕</button></h3>
     <select id="fill-inspect-select" class="fill-inspect-select" aria-label="選擇表格"></select>
     <div id="fill-inspect-body"></div>
     <div class="form-actions"><button class="btn" id="fill-inspect-close">關閉</button></div>
@@ -381,13 +383,13 @@
 <script src="js/core/parser.js?v=6"></script>
 <script src="js/core/validator.js?v=6"></script>
 <script src="js/core/exporter.js?v=6"></script>
-<script src="js/core/storage.js?v=6"></script>
+<script src="js/core/storage.js?v=7"></script>
 <!-- 模組設定檔 -->
 <script src="js/configs/water.js?v=6"></script>
 <script src="js/configs/air.js?v=6"></script>
 <script src="js/configs/noise.js?v=6"></script>
 <!-- 介面 -->
-<script src="js/app.js?v=6"></script>
+<script src="js/app.js?v=7"></script>
 <!-- 填表核對（OCR／PDF 函式庫本地載入；掃描檔辨識需以 http(s) 開啟） -->
 <script src="lib/pdfjs/pdf.min.js?v=7"></script>
 <script src="lib/tesseract/tesseract.min.js?v=7"></script>

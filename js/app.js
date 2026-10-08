@@ -65,6 +65,24 @@
   }
 
   /* ================= 啟動 ================= */
+  // 資料庫升級被其他分頁（舊版網站）擋住／其他分頁已載入新版 → 提示
+  window.addEventListener("yang-storage", function (e) {
+    var t = e && e.detail && e.detail.type;
+    if (t === "blocked") {
+      toastSticky("網站已更新：請關閉其他已開啟本網站的分頁（或重新整理那些分頁），此頁才能繼續載入");
+      // 先讓導覽可用（填表核對等不需資料庫的頁面仍可使用）
+      if (!navBound) { bindNav(); restoreView(); }
+    }
+    else if (t === "versionchange") toastSticky("網站已在其他分頁更新，請重新整理此頁");
+  });
+  function toastSticky(msg) {
+    var t = $("#toast");
+    if (!t) return;
+    t.textContent = msg;
+    t.className = "show error";
+    clearTimeout(toast._h);
+    toast._h = setTimeout(function () { t.className = ""; }, 15000);
+  }
   function init() {
     seedIfFirstRun()
       .then(reloadStations)
@@ -145,7 +163,10 @@
   }
 
   /* ================= 導覽 ================= */
+  var navBound = false;
   function bindNav() {
+    if (navBound) return;
+    navBound = true;
     $$(".nav-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
         $$(".nav-btn").forEach(function (b) { b.classList.remove("active"); });
@@ -160,6 +181,11 @@
         if (btn.dataset.view === "fill" && window.YangFill && window.YangFill.ui) window.YangFill.ui.onShow();
         $("#action-bar").classList.toggle("hidden", btn.dataset.view !== "convert");
         try { localStorage.setItem("yang.lastView", btn.dataset.view); } catch (e) { /* 私密模式等，忽略 */ }
+        // 網址 #hash 跟著目前頁面（避免重新整理時被舊的 #fill 帶回填表核對）
+        try {
+          var h = btn.dataset.view === "convert" ? "" : "#" + btn.dataset.view;
+          if (location.hash !== h && history.replaceState) history.replaceState(null, "", location.pathname + location.search + h);
+        } catch (e) { /* file:// 等環境，忽略 */ }
       });
     });
   }
@@ -635,13 +661,19 @@
         return C.storage.restoreAll(JSON.parse(txt));
       }).then(function () {
         toast("還原完成，重新載入…");
+        forgetView();
         setTimeout(function () { location.reload(); }, 800);
       }).catch(function (e) { toast("還原失敗：" + e.message, true); });
     });
     $("#btn-wipe").addEventListener("click", function () {
       if (!confirm("將清除案場、測站、匯入紀錄與對照表修改，且無法復原。確定？")) return;
-      C.storage.clearAll().then(function () { location.reload(); });
+      C.storage.clearAll().then(function () { forgetView(); location.reload(); });
     });
+  }
+  /* 清除／還原後重新載入：回到首頁（資料轉換），不停留在設定/備份 */
+  function forgetView() {
+    try { localStorage.removeItem("yang.lastView"); } catch (e) { /* 忽略 */ }
+    try { if (location.hash && history.replaceState) history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* 忽略 */ }
   }
 
   function doExport() {

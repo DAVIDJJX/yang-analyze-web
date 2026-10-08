@@ -26,6 +26,8 @@
     },
     itemMap: {},            // 範本項目 → 也可接受的原始項目，例：{ NMHC: ["NMHC"] }
     minStationSim: 0.6,
+    lowConf: 60,            // OCR 信心度低於此值的單一來源 → 需核對
+    maxMappingPoints: 40,   // 無測站的「測點」超過此數（多為逐時／逐日數列）不要求使用者逐點對應
     valueFallback: true,    // 無相容統計別時，可用「統計別不明」（value）的數值（狀態不會是 checked）
     sourceRank: { pivot: 0, module: 1, row: 2, context: 3, point: 4 }
   };
@@ -123,7 +125,8 @@
       if (s.station && !slotStations.some(function (x) { return x === s.station; })) slotStations.push(s.station);
     });
     function aliasOf(f) {
-      var a = aliases[keyOf(f)];
+      var k = keyOf(f);
+      var a = Object.prototype.hasOwnProperty.call(aliases, k) ? aliases[k] : null;
       return (typeof a === "string" && a) ? a : null;
     }
     var sim = dict.stationSim;   // 內建快取
@@ -135,7 +138,7 @@
       return slotInfo.filter(function (x) { return !d || !x.digits || x.digits === d; });
     }
     // 數值的測站 → 最相符的範本測站
-    var bestCache = {};
+    var bestCache = Object.create(null);
     function bestFor(f) {
       var k = f.station || "";
       if (bestCache[k]) return bestCache[k];
@@ -161,7 +164,7 @@
       return null;
     }
     // 索引：項目 → { all, byStation: {範本測站: [facts]}, unmapped: [無測站或對不到任何範本測站者] }
-    var eligCache = {}, aliasElig = {}, index = {};
+    var eligCache = Object.create(null), aliasElig = Object.create(null), index = Object.create(null);
     function eligibleStations(f) {
       var al = aliasOf(f);
       if (al) {
@@ -179,7 +182,7 @@
       return out;
     }
     facts.forEach(function (f) {
-      var ix = index[f.item] || (index[f.item] = { all: [], byStation: {}, unmapped: [] });
+      var ix = index[f.item] || (index[f.item] = { all: [], byStation: Object.create(null), unmapped: [] });
       ix.all.push(f);
       var el = eligibleStations(f);
       if (el === null || (!aliasOf(f) && bestFor(f).sim < rules.minStationSim)) ix.unmapped.push(f);
@@ -199,7 +202,7 @@
       return null;
     }
     // 同表同項目同測站但季別不同的空格 → 需日期佐證
-    var periodGroups = {};
+    var periodGroups = Object.create(null);
     slots.forEach(function (s) {
       if (!s.period) return;
       var k = [s.docId, s.tableId, s.item, s.stat, s.station || ""].join("|");
@@ -258,7 +261,7 @@
         });
       });
       // 統計別不明的數值若同一表格有 ≥ 3 筆 → 視為數列（逐時/逐日），不作為候選
-      var fbCount = {};
+      var fbCount = Object.create(null);
       cands.forEach(function (c) { if (c.fallback) fbCount[c.tableKey] = (fbCount[c.tableKey] || 0) + 1; });
       cands = cands.filter(function (c) { return !c.fallback || fbCount[c.tableKey] < 3; });
       cands.sort(function (a, b) {
@@ -276,7 +279,14 @@
         items.forEach(function (code) {
           if (index[code]) otherStation += index[code].all.filter(function (f) { return !!statRankOf(slot, f); }).length;
         });
-        if (unmapped.length) {
+        var pointKeys = Object.create(null), nPoints = 0;
+        unmapped.forEach(function (f) { var k = keyOf(f); if (!pointKeys[k]) { pointKeys[k] = 1; nPoints++; } });
+        if (unmapped.length && nPoints > (rules.maxMappingPoints || 40)) {
+          // 上千個無測站的「測點」（逐時數列等）：無法逐點對應，視為無對應資料
+          res.status = "missing";
+          res.note = "原始資料有 " + unmapped.length + " 筆未標示測站的「" + dict.itemLabel(slot.item) +
+            "」數值（疑似逐時／逐日數列），無法判斷屬於哪個測站";
+        } else if (unmapped.length) {
           res.status = "mapping";
           res.note = "有 " + unmapped.length + " 筆「" + dict.itemLabel(slot.item) + "」數值未標示測站，請在「測點對應」指定";
           res.candidates = unmapped.slice(0, 12).map(function (f) {
@@ -327,13 +337,14 @@
       var conflictOther = others.filter(function (c) {
         return !c.agrees && c.statRank === best.statRank && !c.fallback;
       });
-      var stationsSeen = {};
+      var stationsSeen = Object.create(null);
       if (!slot.station) cands.forEach(function (c) { stationsSeen[keyOf(c.f)] = 1; });
       res.value = best.value;
       res.factId = best.f.id;
       var notes = best.note ? [best.note] : [];
       if (!slot.station && Object.keys(stationsSeen).length > 1) {
         res.status = "conflict";
+        notes = notes.map(function (n) { return n.replace(/(^|；)表格未標示測站(?=；|$)/, "$1").replace(/^；|；$/g, ""); }).filter(Boolean);
         notes.push("表格未標示測站，原始資料有多個測站");
       } else if (best.fallback && others.some(function (c) { return c.fallback && !c.agrees; })) {
         res.status = "conflict";
@@ -346,6 +357,16 @@
         notes.push("與" + describe(agreeOther[0]) + "一致");
       } else {
         res.status = "auto";
+      }
+      // OCR 單一來源的可疑值：信心度低、或負值（「-」常是印章或框線殘影）→ 需核對
+      var bc = typeof best.f.conf === "number" ? best.f.conf : null;
+      if (res.status === "auto" && bc !== null && bc < (rules.lowConf || 60)) {
+        res.status = "conflict";
+        notes.push("OCR 信心度 " + Math.round(bc) + "，請對照原始影像");
+      }
+      if (bc !== null && typeof best.num === "number" && best.num < 0 && res.status !== "conflict") {
+        res.status = "conflict";
+        notes.push("辨識為負值，請對照原始影像（「-」可能是印章或框線殘影）");
       }
       if (periodRejected) notes.push("另有 " + periodRejected + " 筆其他季別資料未採用");
       res.note = notes.join("；");
@@ -383,9 +404,9 @@
   function unmatchedGroups(slots, facts, assignments) {
     var dict = D();
     slots = slots || []; facts = facts || []; assignments = assignments || [];
-    var slotItems = {};
+    var slotItems = Object.create(null);
     slots.forEach(function (s) { if (s.item) slotItems[s.item] = 1; });
-    var used = {};
+    var used = Object.create(null);
     assignments.forEach(function (a) {
       if (a.factId) used[a.factId] = 1;
       if (a.status === "mapping") return;          // 待對應的候選不算「已使用」
@@ -393,7 +414,7 @@
     });
     var slotStations = [];
     slots.forEach(function (s) { if (s.station && slotStations.indexOf(s.station) < 0) slotStations.push(s.station); });
-    var groups = {}, order = [], usedKeys = {};
+    var groups = Object.create(null), order = [], usedKeys = Object.create(null);
     facts.forEach(function (f) {
       if (!f || !f.item) return;
       var k = keyOf(f);

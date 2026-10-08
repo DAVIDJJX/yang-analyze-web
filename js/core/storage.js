@@ -18,10 +18,16 @@
   var CACHE_STORES = ["fillcache"];   // 快取類：不備份、清除全部資料時一併清空
   var dbPromise = null;
 
+  /* 通知介面（app.js 以 window 事件顯示提示）：blocked＝舊版分頁佔住資料庫；versionchange＝其他分頁已更新 */
+  function notify(type) {
+    try { window.dispatchEvent(new CustomEvent("yang-storage", { detail: { type: type } })); } catch (e) { /* 忽略 */ }
+  }
   function open() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB_NAME, DB_VER);
+      // 其他分頁仍開著舊版網站（未關閉連線）時，升級會被擋住：提示使用者關閉其他分頁
+      req.onblocked = function () { notify("blocked"); };
       req.onupgradeneeded = function (e) {
         var db = e.target.result;
         if (!db.objectStoreNames.contains("projects")) db.createObjectStore("projects", { keyPath: "code" });
@@ -31,10 +37,28 @@
         if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath: "key" });
         if (!db.objectStoreNames.contains("fillcache")) db.createObjectStore("fillcache", { keyPath: "key" });
       };
-      req.onsuccess = function () { resolve(req.result); };
+      req.onsuccess = function () {
+        var db = req.result;
+        // 之後的版本升級（其他分頁載入新版）：主動關閉連線，避免擋住升級
+        db.onversionchange = function () {
+          try { db.close(); } catch (e) { /* 忽略 */ }
+          dbPromise = null;
+          notify("versionchange");
+        };
+        resolve(db);
+      };
       req.onerror = function () { reject(req.error); };
     });
     return dbPromise;
+  }
+  /* 逾時保護（快取類操作）：資料庫被擋住或卡住時以 fallback 結束，不拖住主流程 */
+  function withTimeout(p, ms, fallback) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var h = setTimeout(function () { if (!done) { done = true; resolve(fallback); } }, ms);
+      p.then(function (v) { if (!done) { done = true; clearTimeout(h); resolve(v); } },
+        function () { if (!done) { done = true; clearTimeout(h); resolve(fallback); } });
+    });
   }
 
   function tx(store, mode, fn) {
@@ -97,10 +121,11 @@
 
     /* ---------- 填表核對辨識快取（失敗一律不影響主流程） ---------- */
     fillCache: {
-      get: function (key) { return storage.get("fillcache", key).catch(function () { return null; }); },
-      put: function (obj) { return storage.put("fillcache", obj).catch(function () { return null; }); },
+      get: function (key) { return withTimeout(storage.get("fillcache", key), 3000, null); },
+      put: function (obj) { return withTimeout(storage.put("fillcache", obj), 3000, null); },
       clear: function () { return storage.clearStore("fillcache"); }
-    }
+    },
+    withTimeout: withTimeout
   };
 
   YangCore.storage = storage;

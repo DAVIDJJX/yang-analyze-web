@@ -199,8 +199,13 @@
     for (var i = 0; i < chunks.length; i++) { out.set(chunks[i], pos); pos += chunks[i].length; }
     return out;
   }
-  /** 讓資料流經 TransformStream（Compression/DecompressionStream），收集輸出 */
-  function pump(ts, data) {
+  var MAX_INFLATE = 200 * 1048576;     // 單一項目解壓後上限（防 ZIP 炸彈：小檔解成數 GB 會讓分頁當掉）
+  function tooBig(limit) {
+    if (limit < MAX_INFLATE) return zipError("ZIP 項目解壓縮後的資料比宣告的大小多（檔案可能已損毀）");
+    return zipError("檔案內容過大（解壓縮後超過 " + Math.round(limit / 1048576) + " MB），可能已損毀或不是一般文件");
+  }
+  /** 讓資料流經 TransformStream（Compression/DecompressionStream），收集輸出；limit＝輸出位元組上限 */
+  function pump(ts, data, limit) {
     var w = ts.writable.getWriter();
     w.write(data).catch(noop);
     w.close().catch(noop);
@@ -210,6 +215,11 @@
         if (r.done) return concatChunks(chunks, total);
         var c = r.value instanceof Uint8Array ? r.value : new Uint8Array(r.value);
         chunks.push(c); total += c.length;
+        if (limit && total > limit) {
+          chunks = [];
+          try { reader.cancel().catch(noop); } catch (e) { /* 忽略 */ }
+          throw tooBig(limit);
+        }
         return step();
       });
     }
@@ -225,9 +235,9 @@
   }
 
   /** 原始 deflate 解壓；size/crc 為預期值（gzip 包裝備援需要） */
-  function inflateRaw(data, size, crc) {
+  function inflateRaw(data, size, crc, limit) {
     var ts = makeStream(root.DecompressionStream, "deflate-raw");
-    if (ts) return pump(ts, data);
+    if (ts) return pump(ts, data, limit);
     // 舊版 Safari 只支援 gzip：補上 gzip 檔頭/檔尾（CRC 與長度由中央目錄得知）
     if (size !== undefined && crc !== undefined) {
       var gz = makeStream(root.DecompressionStream, "gzip");
@@ -237,7 +247,7 @@
         wrap.set(data, 10);
         var t = new DataView(wrap.buffer, 10 + data.length, 8);
         t.setUint32(0, crc >>> 0, true); t.setUint32(4, size >>> 0, true);
-        return pump(gz, wrap);
+        return pump(gz, wrap, limit);
       }
     }
     var cfb = sheetjsCFB();
@@ -300,9 +310,12 @@
       return new Promise(function (resolve) { resolve(need(name)); }).then(function (e) {
         if (e.flag & 1) throw zipError("ZIP 項目「" + e.name + "」已加密，無法讀取（請先移除密碼保護）");
         var data = rawData(e), p;
+        if (e.size > MAX_INFLATE) throw tooBig(MAX_INFLATE);
+        // 宣告大小可能造假：實際輸出超過宣告值（另留 1 MB）或上限即停止
+        var limit = e.size > 0 ? Math.min(MAX_INFLATE, e.size + 1048576) : MAX_INFLATE;
         if (e.method === 0) p = Promise.resolve(data.slice());
         else if (e.method === 8) {
-          p = inflateRaw(data, e.size, e.crc).catch(function (err) {
+          p = inflateRaw(data, e.size, e.crc, limit).catch(function (err) {
             if (err && err.name === "ZipError") throw err;
             throw zipError("ZIP 項目「" + e.name + "」解壓縮失敗（檔案可能損毀）");
           });
