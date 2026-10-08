@@ -387,7 +387,7 @@
       bins.forEach(function (bin, i) {
         chain = chain.then(function () {
           checkAbort(opts);
-          var dpi = estimateDpi(bin);
+          var dpi = (type.meta && type.meta.dpi && type.meta.dpi >= 72 && type.meta.dpi <= 1200) ? type.meta.dpi : estimateDpi(bin);
           doc.pages.push({ index: i + 1, width: bin.width, height: bin.height, dpi: dpi });
           return processBitmapPage(bin, i + 1, dpi, doc, opts).then(function (r) {
             r.tables.forEach(function (t) { doc.tables.push(t); });
@@ -413,7 +413,16 @@
   }
 
   function processSheet(bytes, doc, type) {
-    return YF.xlsx.load(bytes, doc.name).then(function (model) {
+    var input = bytes;
+    // Big5 / UTF-16 的 CSV 先轉成 UTF-8，SheetJS 才不會亂碼
+    var enc = type.meta && type.meta.encoding;
+    if ((type.kind === "csv" || type.kind === "txt") && enc && enc !== "utf-8" && root.TextDecoder) {
+      try {
+        var text = new root.TextDecoder(enc).decode(bytes);
+        input = new root.TextEncoder().encode("\ufeff" + text.replace(/^\ufeff/, ""));
+      } catch (e) { input = bytes; }
+    }
+    return YF.xlsx.load(input, doc.name).then(function (model) {
       doc._model = model;
       doc.tables = model.tables || [];
       var sheets = {};
@@ -516,23 +525,27 @@
     opts = opts || {};
     var role = opts.role || "raw";
     return readBytes(file).then(function (bytes) {
-      var type = YF.filetype.detect(bytes, file.name);
+      var FT = YF.filetype;
+      var type = FT.detect(bytes, file.name);
       var doc = newDoc(file, role, type);
       doc._bytes = bytes;
-      if (type.mismatch) doc.warnings.push("副檔名與實際內容不符：" + (type.detail || type.label));
-      var meta = YF.filetype.KINDS && YF.filetype.KINDS[type.kind];
-      if (meta && meta.supported === false) {
-        doc.warnings.push(meta.hint || "不支援的檔案格式");
+      doc.type = type;
+      if (type.mismatch) doc.warnings.push(type.mismatchText || ("副檔名與實際內容不符：" + type.label));
+      if (type.supported === false || !type.route) {
+        doc.warnings.push(type.hint || ("不支援的檔案格式（" + (type.label || type.kind) + "）"));
         doc.unsupported = true;
         return doc;
       }
-      if (role === "template" && ["word", "excel"].indexOf(type.family) < 0) {
+      if (FT.canUse) {
+        var cu = FT.canUse(type, role);
+        if (!cu.ok) { doc.warnings.push(cu.reason); doc.unsupported = true; return doc; }
+      } else if (role === "template" && ["word", "excel"].indexOf(type.family) < 0) {
         doc.warnings.push("待填表格目前支援 Word（.docx）與 Excel（.xlsx/.xls）");
         doc.unsupported = true;
         return doc;
       }
       // 範本需保留可寫回的模型，不使用快取
-      var useCache = role === "raw" && opts.cache && ["docuworks", "pdf", "image"].indexOf(type.family) >= 0;
+      var useCache = role === "raw" && opts.cache && ["xdw", "pdf", "image"].indexOf(type.route) >= 0;
       var hashP = useCache ? sha256Hex(bytes) : Promise.resolve(null);
       return hashP.then(function (hash) {
         doc.hash = hash;
@@ -548,19 +561,14 @@
             return doc;
           }
           var work;
-          switch (type.family) {
-            case "docuworks": work = processXdw(bytes, doc, opts); break;
+          switch (type.route) {
+            case "xdw": work = processXdw(bytes, doc, opts); break;
             case "pdf": work = processPdf(bytes, doc, opts); break;
             case "image": work = processImage(bytes, doc, opts, type); break;
-            case "word":
-              if (type.kind === "doc" || type.kind === "rtf" || type.kind === "odt") {
-                doc.warnings.push("舊版 Word（.doc）/RTF 無法在瀏覽器解析，請在 Word 另存為 .docx 後上傳");
-                doc.unsupported = true; work = Promise.resolve();
-              } else work = processDocx(bytes, doc);
-              break;
-            case "excel": case "text": work = processSheet(bytes, doc, type); break;
+            case "docx": work = processDocx(bytes, doc); break;
+            case "sheet": work = processSheet(bytes, doc, type); break;
             default:
-              doc.warnings.push("無法辨識的檔案格式（" + (type.label || type.kind) + "）");
+              doc.warnings.push(type.hint || ("無法辨識的檔案格式（" + (type.label || type.kind) + "）"));
               doc.unsupported = true; work = Promise.resolve();
           }
           return work.then(function () {
@@ -592,7 +600,7 @@
     }
     doc.getPageBitmap = function (n) {
       for (var i = 0; i < lru.length; i++) if (lru[i].n === n) return Promise.resolve(lru[i].bin);
-      if (type.family === "docuworks") {
+      if (type.route === "xdw") {
         if (!doc._xdwPages) doc._xdwPages = YF.xdw.parse(bytes).pages || [];
         var p = doc._xdwPages[n - 1];
         if (!p) return Promise.resolve(null);
@@ -601,12 +609,12 @@
           return bin;
         }).then(function (bin) { return bin ? remember(n, bin) : null; });
       }
-      if (type.family === "pdf") {
+      if (type.route === "pdf") {
         var pdfP = doc._pdf ? Promise.resolve(doc._pdf) : YF.pdf.open(bytes).then(function (pdf) { doc._pdf = pdf; return pdf; });
         return pdfP.then(function (pdf) { return pdf.getPage(n); }).then(function (pg) { return pg.render(200); })
           .then(function (rgba) { return remember(n, YF.raster.binarize(rgba.data, rgba.width, rgba.height)); });
       }
-      if (type.family === "image") {
+      if (type.route === "image") {
         if (doc._bitmaps) return Promise.resolve(doc._bitmaps[n - 1] || null);
         return processImageBitmaps(bytes, type).then(function (bins) { doc._bitmaps = bins; return bins[n - 1] || null; });
       }
@@ -726,17 +734,18 @@
   function fillTemplate(doc, fills) {
     if (!doc || !doc._model) return Promise.reject(new Error("範本尚未載入"));
     var origExt = (String(doc.name).match(/\.([^.]+)$/) || [, ""])[1].toLowerCase();
-    if (doc.family === "word") {
-      return YF.docx.fill(doc._model, fills).then(function (bytes) {
-        var ext = origExt === "docm" ? "docm" : "docx";
-        return { bytes: bytes, fileName: filledName(doc.name, ext), mime: MIME[ext], warnings: [] };
+    var warnings = [];
+    if (doc.type && doc.type.route === "docx") {
+      return YF.docx.fill(doc._model, fills, { warnings: warnings }).then(function (bytes) {
+        var ext = doc._model.outExt || (origExt === "docm" ? "docm" : "docx");
+        return { bytes: bytes, fileName: filledName(doc.name, ext), mime: MIME[ext] || MIME.docx, warnings: warnings };
       });
     }
-    return YF.xlsx.fill(doc._model, fills).then(function (res) {
+    return YF.xlsx.fill(doc._model, fills, { warnings: warnings }).then(function (res) {
       var bytes = res && res.bytes ? res.bytes : res;
       var ext = (res && res.ext) || (origExt === "xlsm" ? "xlsm" : origExt === "xls" ? "xls" : "xlsx");
-      var warns = (res && res.warnings) || (res && res.warning ? [res.warning] : []);
-      return { bytes: bytes, fileName: filledName(doc.name, ext), mime: MIME[ext] || "application/octet-stream", warnings: warns };
+      var warns = (res && res.warnings) || warnings;
+      return { bytes: bytes, fileName: filledName(doc.name, ext), mime: (res && res.mime) || MIME[ext] || "application/octet-stream", warnings: warns };
     });
   }
 

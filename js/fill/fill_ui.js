@@ -779,8 +779,10 @@
   }
   function outExt(doc) {
     var ext = (String(doc.name).match(/\.([^.]+)$/) || [, "docx"])[1].toLowerCase();
-    if (doc.family === "word") return ext === "docm" ? "docm" : "docx";
-    return ext === "xlsm" ? "xlsm" : ext === "xls" ? "xls" : "xlsx";
+    if (doc._model && doc._model.outExt) return doc._model.outExt;
+    if (doc.type && doc.type.route === "docx") return ext === "docm" ? "docm" : "docx";
+    if (ext === "csv") return "csv";
+    return ext === "xlsm" ? "xlsm" : ext === "xltx" ? "xlsx" : ext === "xls" ? "xls" : "xlsx";
   }
 
   function fillsFor(doc) {
@@ -809,7 +811,8 @@
     if (btn) btn.disabled = true;
     buildFilled(e).then(function (out) {
       saveBlob(out.bytes, out.fileName, out.mime);
-      (out.warnings || []).forEach(function (w) { toast(w); });
+      var ws = out.warnings || [];
+      if (ws.length) toast(ws[0] + (ws.length > 1 ? "（另有 " + (ws.length - 1) + " 則提示）" : ""));
     }).catch(function (err) {
       toast("產生檔案失敗：" + err.message, true);
       if (root.console) console.error(err);

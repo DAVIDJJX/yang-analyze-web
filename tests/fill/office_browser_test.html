@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Office 範本測試</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1d2330; --ok: #1a7f37; --ng: #c62828; --muted: #667085; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #14171c; --fg: #e6e9ef; --ok: #4ac26b; --ng: #ff6b6b; --muted: #98a2b3; }
+  }
+  :root[data-theme="dark"] { --bg: #14171c; --fg: #e6e9ef; --ok: #4ac26b; --ng: #ff6b6b; --muted: #98a2b3; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  #summary { font-weight: 600; margin: 8px 0 12px; }
+  #summary.pass { color: var(--ok); } #summary.fail { color: var(--ng); }
+  #log { white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, monospace; margin: 0; }
+  .ok { color: var(--ok); } .ng { color: var(--ng); } .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>docx.js / xlsxtpl.js / zip.js 瀏覽器測試</h1>
+<p class="muted">由 <code>node tests/fill/run_browser.mjs</code> 自動執行；也可用 serve.bat 開啟本頁手動檢視。</p>
+<div id="summary">執行中…</div>
+<pre id="log"></pre>
+<script src="../../lib/xlsx.full.min.js"></script>
+<script src="../../js/fill/zip.js"></script>
+<script src="../../js/fill/docx.js"></script>
+<script src="../../js/fill/xlsxtpl.js"></script>
+<script src="office_browser_test.js"></script>
+</body>
+</html>
