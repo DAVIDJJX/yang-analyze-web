@@ -116,7 +116,7 @@
     it("NMHC", "air", "NMHC", "非甲烷碳氫化合物", "ppm", ["NMHC", "非甲烷碳氫化合物", "非甲烷總碳氫化合物"], ["NMHG", "NNHC", "NM HC"], [], { ci: true }),
     it("CH4", "air", "CH₄", "甲烷", "ppm", ["CH4", "甲烷"], ["CH,", "CH 4", "CHa", "CH;"], ["CH"], { ci: true }),
     it("PM10", "air", "PM10", "懸浮微粒", "ug/m3", ["PM10", "PM 10", "懸浮微粒"], ["PMio", "PMi0", "PMl0", "PM1o", "PMlo", "PMIO", "PM1O", "PM l0", "PM io"], [], { ci: true }),
-    it("PM2.5", "air", "PM2.5", "細懸浮微粒", "ug/m3", ["PM2.5", "PM 2.5", "細懸浮微粒"], ["PM25", "PM2,5", "PM2.s", "PM2 5", "PM2,s", "PM 25"], [], { ci: true }),
+    it("PM2.5", "air", "PM2.5", "細懸浮微粒", "ug/m3", ["PM2.5", "PM 2.5", "細懸浮微粒"], ["PM25", "PM2,5", "PM2.s", "PM2 5", "PM2,s", "PM 25", "PM2.", "PM2", "PM2,"], [], { ci: true }),
     it("TSP", "air", "TSP", "總懸浮微粒", "ug/m3", ["TSP", "總懸浮微粒"], ["T.S.P", "T.S.P."], [], { ci: true }),
     it("H2S", "air", "H₂S", "硫化氫", "ppm", ["H2S", "硫化氫"], ["H,S", "HzS"], [], { ci: true }),
     it("NH3", "air", "NH₃", "氨", "ppm", ["NH3", "氨氣", "氨"], ["NH,"], [], { ci: true, notAfter: /^\s*-\s*N/i }),
@@ -484,6 +484,8 @@
       else return res;
     }
     if (!/^-?(\d+(\.\d*)?|\.\d+)$/.test(t)) return res;
+    // 「02」「03」「007」等前導零整數：報告不會這樣寫，多半是 O₂/O₃ 表頭或漏掉小數點的 OCR 誤讀
+    if (/^-?0\d+$/.test(t)) return res;
     if (t.charAt(0) === ".") t = "0" + t;
     if (t.slice(0, 2) === "-.") t = "-0" + t.slice(1);
     t = t.replace(/\.$/, "");

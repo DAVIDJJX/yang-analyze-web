@@ -299,7 +299,7 @@
   }
 
   /* ---------------- 語意推論 ---------------- */
-  function itemFrom(T, rl, cl, allLabels) {
+  function itemFrom(T, rl, cl, allLabels, X) {
     // secondary：非主軸（逐時表的列標題「日平均值或最頻風向」）中同時含統計別的標題不提供項目
     function first(list, secondary) {
       for (var i = 0; i < list.length; i++) {
@@ -326,6 +326,17 @@
         for (var i = 0; i < lists[k].length; i++) {
           var m = feat(lists[k][i].X).method;
           if (m && m.code) { hit = { code: m.code, generic: false, L: lists[k][i], viaMethod: true }; break; }
+        }
+      }
+    }
+    // 同列右側的「檢測方法編號」（例：值 4 → 同列 NIEA A205.11C → PM2.5），項目標籤 OCR 失敗時的備援
+    if (!hit && X) {
+      for (var rr = X.r0; rr <= X.r1 && !hit; rr++) {
+        for (var cc = X.c1 + 1; cc < T.nC && !hit; cc++) {
+          var Y = cellAt(T, rr, cc);
+          if (!Y || Y === X || (Y.kind !== "label" && Y.kind !== "note")) continue;
+          var mm = feat(Y).method;
+          if (mm && mm.code) hit = { code: mm.code, generic: false, L: { X: Y, dist: 500 + cc - X.c1, axis: "row", T: T }, viaMethod: true };
         }
       }
     }
@@ -679,7 +690,7 @@
         if (key && key.kind === "value") return;           // 時序列（列鍵為整數）
       }
       var all = rl.concat(cl);
-      var ih = itemFrom(T, rl, cl, all);
+      var ih = itemFrom(T, rl, cl, all, X);
       if (!ih) return;
       var stat = statFrom(T, all);
       if (stat === "hourly") return;
@@ -813,6 +824,27 @@
       }
     });
   }
+  /* 同一頁其他表格恰好只出現一個測站 → 本頁無測站的數值（例：測定條件表的風速/溫濕度）歸該測站 */
+  function applyPageStations(facts, bestKnown, knownOn) {
+    var byPage = {};
+    facts.forEach(function (f) {
+      if (f.page === null || f.page === undefined) return;
+      var g = byPage[f.page] || (byPage[f.page] = { st: {}, n: 0, orphans: [] });
+      if (f.station) { if (!g.st[f.station]) { g.st[f.station] = f; g.n++; } }
+      else g.orphans.push(f);
+    });
+    Object.keys(byPage).forEach(function (pg) {
+      var g = byPage[pg];
+      if (g.n !== 1 || !g.orphans.length) return;
+      var name = Object.keys(g.st)[0], src = g.st[name];
+      g.orphans.forEach(function (f) {
+        // 同項目已有該測站數值時不併入（避免把同頁其他測點誤歸同一測站）
+        if (facts.some(function (o) { return o.station === name && o.item === f.item && o.page === f.page; })) return;
+        f.stationRaw = src.stationRaw || name; f.stationVia = "page"; f.source = "context";
+        resolveStation(f, bestKnown, knownOn);
+      });
+    });
+  }
   function contextStation(T, bestKnown, knownOn) {
     if (T._ctxStation !== undefined) return T._ctxStation;
     var res = null, table = T.table;
@@ -921,6 +953,7 @@
     out.forEach(function (f) { resolveStation(f, bestKnown, knownOn); });
     applySampleIds(Ts, out, bestKnown, knownOn);
     applyContextStations(out, bestKnown, knownOn);
+    applyPageStations(out, bestKnown, knownOn);
     out = dedupeRows(out);
     assignPoints(out);
     var seen = {};
