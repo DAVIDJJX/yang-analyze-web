@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCR／PDF 元件測試</title>
+<style>
+  :root { --ok: #1a7f4e; --ng: #d23b3b; --bd: #dde3ec; --bg: #ffffff; --fg: #1d2733; --muted: #5b6878; }
+  body { font-family: system-ui, "Microsoft JhengHei", "PingFang TC", sans-serif; background: var(--bg); color: var(--fg);
+         margin: 0; padding: 24px 16px; max-width: 1100px; }
+  h1 { font-size: 1.25rem; margin: 0 0 8px; }
+  p.note { color: var(--muted); font-size: .9rem; margin: 4px 0 14px; }
+  #banner { font-size: 1.1rem; font-weight: 700; padding: 12px 18px; border-radius: 8px; margin-bottom: 16px; }
+  #banner.pass { background: #e6f5ee; color: var(--ok); border: 1px solid var(--ok); }
+  #banner.fail { background: #fdecec; color: var(--ng); border: 1px solid var(--ng); }
+  #banner.running { background: #fff7e0; color: #8a6d1a; border: 1px solid #e6c65a; }
+  table { border-collapse: collapse; font-size: .85rem; width: 100%; }
+  th, td { border: 1px solid var(--bd); padding: 4px 8px; text-align: left; vertical-align: top; word-break: break-all; }
+  th { background: #f0f4fa; }
+  .ok { color: var(--ok); font-weight: 600; } .ng { color: var(--ng); font-weight: 600; } .sk { color: var(--muted); }
+  #timings { margin: 14px 0; font-size: .9rem; }
+  #timings code { background: #f0f4fa; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>填表核對 — OCR（Tesseract.js）／ PDF（pdf.js）元件測試</h1>
+<p class="note">全部使用網站內建的 lib/ 檔案（不連外網）。合成影像與合成 PDF 一定會測；若本機有 test_data/fill/（真實樣本，不在公開 repo 中）會加測真實儲存格。
+參數：<code>?workers=3</code>、<code>?real=0</code>、<code>?bench=1</code>、<code>?dpi=0</code>、<code>?langs=chi_tra</code>、<code>?auto=0</code>。</p>
+<div id="banner" class="running">測試執行中…</div>
+<div id="timings"></div>
+<table><thead><tr><th style="width:34%">項目</th><th style="width:7%">結果</th><th>說明</th></tr></thead><tbody id="rows"></tbody></table>
+
+<script src="../../lib/tesseract/tesseract.min.js"></script>
+<script src="../../lib/pdfjs/pdf.min.js"></script>
+<script src="../../js/fill/ocr.js"></script>
+<script src="../../js/fill/pdfread.js"></script>
+<script>
+(function () {
+  "use strict";
+  var YF = window.YangFill;
+  var Q = new URLSearchParams(location.search);
+  var R = { done: false, pass: 0, fail: 0, skip: 0, rows: [], timings: {}, notes: [] };
+  window.__result = R;
+
+  function row(name, status, detail) {
+    R.rows.push({ name: name, status: status, detail: detail || "" });
+    if (status === "ok") R.pass++; else if (status === "FAIL") R.fail++; else R.skip++;
+    var tr = document.createElement("tr");
+    var cls = status === "ok" ? "ok" : status === "FAIL" ? "ng" : "sk";
+    tr.innerHTML = "<td></td><td class='" + cls + "'>" + status + "</td><td></td>";
+    tr.children[0].textContent = name; tr.children[2].textContent = detail || "";
+    document.getElementById("rows").appendChild(tr);
+  }
+  function check(name, ok, detail) { row(name, ok ? "ok" : "FAIL", detail); return ok; }
+  function skip(name, why) { row(name, "skip", why); }
+  function timing(k, v) {
+    R.timings[k] = v;
+    var el = document.getElementById("timings");
+    el.innerHTML = Object.keys(R.timings).map(function (k) {
+      return "<code>" + k + "</code> " + R.timings[k];
+    }).join("　");
+  }
+  function now() { return performance.now(); }
+  function norm(s) { return String(s || "").normalize("NFKC").replace(/\s+/g, ""); }
+  function lev(a, b) {
+    a = Array.from(a); b = Array.from(b);
+    var d = []; for (var i = 0; i <= a.length; i++) { d[i] = [i]; }
+    for (var j = 1; j <= b.length; j++) d[0][j] = j;
+    for (i = 1; i <= a.length; i++) for (j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[a.length][b.length];
+  }
+  function fetchBytes(url) {
+    return fetch(url, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error(url + " → HTTP " + r.status);
+      return r.arrayBuffer();
+    }).then(function (ab) { return new Uint8Array(ab); });
+  }
+
+  /* ---------- 合成影像 ---------- */
+  var FONT = '"WenQuanYi Zen Hei","Noto Sans CJK TC","Noto Sans TC","Microsoft JhengHei","PingFang TC","Heiti TC",sans-serif';
+  function textCanvas(lines, px) {
+    var m = document.createElement("canvas").getContext("2d");
+    m.font = px + "px " + FONT;
+    var w = 0; lines.forEach(function (l) { w = Math.max(w, m.measureText(l).width); });
+    var lh = Math.round(px * 1.5), pad = 16;
+    var cv = document.createElement("canvas");
+    cv.width = Math.ceil(w) + pad * 2; cv.height = lh * lines.length + pad * 2;
+    var ctx = cv.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = "#000"; ctx.font = px + "px " + FONT; ctx.textBaseline = "middle";
+    lines.forEach(function (l, i) { ctx.fillText(l, pad, pad + lh * i + lh / 2); });
+    return cv;
+  }
+  function toBitmap(width, height, rgba, thr) {
+    var d = new Uint8Array(width * height);
+    for (var p = 0, i = 0; p < d.length; p++, i += 4) {
+      var v = Math.max(rgba[i], rgba[i + 1], rgba[i + 2]);
+      if (rgba[i + 3] > 0 && v < (thr || 150)) d[p] = 1;
+    }
+    return { width: width, height: height, data: d };
+  }
+  function canvasBitmap(cv) {
+    var id = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height);
+    return toBitmap(cv.width, cv.height, id.data);
+  }
+  // 框內的墨點外接框（inset 去掉格線）
+  function inkBox(bm, b, inset) {
+    inset = inset || 0;
+    var x0 = Math.max(0, b.x0 + inset), y0 = Math.max(0, b.y0 + inset);
+    var x1 = Math.min(bm.width - 1, b.x1 - inset), y1 = Math.min(bm.height - 1, b.y1 - inset);
+    var bx0 = 1e9, by0 = 1e9, bx1 = -1, by1 = -1, n = 0;
+    for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++) {
+      if (bm.data[y * bm.width + x]) { n++; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+    }
+    return n ? { x0: bx0, y0: by0, x1: bx1, y1: by1, count: n } : { count: 0 };
+  }
+  // 裁切 + 白邊 → PBM P4
+  function cropPBM(bm, b, pad) {
+    pad = pad == null ? 12 : pad;
+    var w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1, W = w + pad * 2, H = h + pad * 2;
+    var out = { width: W, height: H, data: new Uint8Array(W * H) };
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++)
+      out.data[(y + pad) * W + x + pad] = bm.data[(b.y0 + y) * bm.width + b.x0 + x];
+    return YF.ocr.bitmapToPBM(out);
+  }
+  function cellJob(lines, px, psm) {
+    var bm = canvasBitmap(textCanvas(lines, px || 30));
+    var ib = inkBox(bm, { x0: 0, y0: 0, x1: bm.width - 1, y1: bm.height - 1 });
+    return { bytes: cropPBM(bm, ib, 12), psm: psm || "7" };
+  }
+  function hasCJKFont() {
+    function sig(ch) {
+      var cv = document.createElement("canvas"); cv.width = 40; cv.height = 40;
+      var c = cv.getContext("2d"); c.fillStyle = "#fff"; c.fillRect(0, 0, 40, 40);
+      c.fillStyle = "#000"; c.font = "32px " + FONT; c.textBaseline = "top"; c.fillText(ch, 2, 2);
+      var d = c.getImageData(0, 0, 40, 40).data, s = 0, h = 0;
+      for (var i = 0; i < d.length; i += 4) if (d[i] < 128) { s++; h = (h * 31 + i) | 0; }
+      return s + ":" + h;
+    }
+    var a = sig("嘉"), b = sig("禾");
+    return a !== b && !/^0:/.test(a);
+  }
+
+  /* ---------- 1. 環境 / 初始化 ---------- */
+  function testInit() {
+    var av = YF.ocr.available();
+    check("ocr.available()", av.ok, av.reason || "ok");
+    var pv = YF.pdf.available();
+    check("pdf.available()", pv.ok && !pv.degraded, pv.reason || "ok");
+    var W = parseInt(Q.get("workers"), 10) || YF.ocr.defaultWorkers();
+    var opt = { workers: W, cacheMethod: Q.get("cache") || "write" };
+    if (Q.get("dpi") != null) opt.dpi = parseInt(Q.get("dpi"), 10);
+    if (Q.get("langs")) opt.langs = Q.get("langs");
+    var prog = [], t0 = now();
+    opt.onProgress = function (p) { prog.push(p); };
+    R.notes.push("init options: " + JSON.stringify(opt));
+    return YF.ocr.init(opt).then(function (inf) {
+      var ms = Math.round(now() - t0);
+      timing("init(" + W + " workers)", ms + " ms");
+      R.timings.initMs = ms; R.timings.workers = W;
+      check("ocr.init()", inf.ready && inf.workers === W, JSON.stringify({ workers: inf.workers, base: inf.base, ms: ms }));
+      var last = prog[prog.length - 1];
+      check("init onProgress", prog.length > 3 && last && last.progress === 1 && /[一-鿿]/.test(last.status),
+        prog.length + " 次，最後 " + JSON.stringify(last));
+      check("ocr.init() 重複呼叫回傳同一個 Promise", YF.ocr.init() === YF.ocr.init(), "");
+      return YF.ocr.recognize(cellJob(["0.5"], 30).bytes, { psm: "7" });   // 暖機
+    });
+  }
+
+  /* ---------- 2. 合成儲存格 ---------- */
+  function testSynthetic() {
+    var cjk = hasCJKFont();
+    R.notes.push("CJK font available: " + cjk);
+    var cases = [
+      { lines: ["0.034"], expect: "0.034" },
+      { lines: ["0.001"], expect: "0.001" },
+      { lines: ["2.19"], expect: "2.19" },
+      { lines: ["<10"], expect: "<10" },
+      { lines: ["SO2 (ppm)"], expect: "SO2 (ppm)" },
+      { lines: ["NIEA A416.14C"], expect: "NIEA A416.14C" },
+      { lines: ["最大小時平均值"], expect: "最大小時平均值", cjk: 1 },
+      { lines: ["示範新城"], expect: "示範新城", cjk: 1 },
+      { lines: ["8小時最大平均值"], expect: "8小時最大平均值", cjk: 1 },
+      { lines: ["監測位置：示範新城"], expect: "監測位置:示範新城", cjk: 1 },
+      { lines: ["日平均值", "0.012"], expect: "日平均值\n0.012", psm: "6", cjk: 1 },
+      { lines: ["115.08.31"], expect: "115.08.31" }
+    ];
+    var use = cases.filter(function (c) { return !c.cjk || cjk; });
+    if (!cjk) skip("合成中文儲存格", "此電腦沒有中文字型可繪製測試影像");
+    var jobs = use.map(function (c) { return cellJob(c.lines, 30, c.psm || "7"); });
+    var t0 = now();
+    return YF.ocr.recognizeCells(jobs).then(function (res) {
+      var ms = now() - t0;
+      timing("合成 " + jobs.length + " 格", Math.round(ms) + " ms（" + Math.round(ms / jobs.length) + " ms/格）");
+      use.forEach(function (c, i) {
+        var got = res[i].text, exp = c.expect;
+        var exact = norm(got) === norm(exp);
+        var d = lev(norm(got), norm(exp));
+        // 中文允許 1 字差異（字型不同），數字必須完全相同
+        var ok = exact || (c.cjk && d <= 1 && norm(exp).length >= 4);
+        check("OCR 合成「" + c.lines.join("⏎") + "」 psm " + (c.psm || "7"), ok,
+          JSON.stringify(got) + " conf " + res[i].conf + (exact ? "" : "（差 " + d + " 字）"));
+        if (c.psm === "6") check("PSM 6 保留換行", /\n/.test(got), JSON.stringify(got));
+      });
+      // 數字專用 worker
+      var nums = ["0.034", "<10", "ND", "28.90", "0.100"];
+      var t1 = now();
+      return Promise.all(nums.map(function (s) {
+        return YF.ocr.recognize(cellJob([s], 30).bytes, { numeric: true });
+      })).then(function (rs) {
+        timing("數字 worker（含建立）", Math.round(now() - t1) + " ms");
+        nums.forEach(function (s, i) {
+          check("OCR 數字模式「" + s + "」", rs[i].text === s, JSON.stringify(rs[i]));
+        });
+        check("數字 worker 已建立", YF.ocr.info().numeric, JSON.stringify(YF.ocr.info()));
+      });
+    });
+  }
+
+  /* ---------- 3. 各種輸入型別 / 邊界 ---------- */
+  function testInputs() {
+    var cv = textCanvas(["12.5"], 34);
+    var id = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height);
+    var bm = canvasBitmap(cv);
+    return new Promise(function (res) { cv.toBlob(res, "image/png"); }).then(function (png) {
+      var inputs = [
+        ["canvas", cv], ["ImageData", id], ["Blob PNG", png], ["Bitmap 物件", bm],
+        ["PBM bytes", YF.ocr.bitmapToPBM(bm)], ["ArrayBuffer PNG", null]
+      ];
+      return png.arrayBuffer().then(function (ab) {
+        inputs[5][1] = ab;
+        return Promise.all(inputs.map(function (x) { return YF.ocr.recognize(x[1], { psm: "7" }); }));
+      }).then(function (rs) {
+        inputs.forEach(function (x, i) { check("輸入型別：" + x[0], rs[i].text === "12.5", JSON.stringify(rs[i])); });
+      });
+    }).then(function () {
+      var white = { width: 120, height: 50, data: new Uint8Array(6000) };
+      return Promise.all([YF.ocr.recognize(white, { psm: "7" }), YF.ocr.recognize(null), YF.ocr.recognize(new Uint8Array(0))]);
+    }).then(function (rs) {
+      check("空白影像 → 空字串", rs[0].text === "" && rs[0].conf === 0, JSON.stringify(rs[0]));
+      check("null / 空位元組 → 空字串", rs[1].text === "" && rs[2].text === "", JSON.stringify([rs[1], rs[2]]));
+      var junk = new Uint8Array(500); for (var i = 0; i < junk.length; i++) junk[i] = (i * 37 + 11) & 255;
+      return YF.ocr.recognizeCells([cellJob(["7.7"]), { bytes: junk, psm: "7" }, cellJob(["8.8"])]);
+    }).then(function (rs) {
+      check("壞影像只影響該格", rs[0].text === "7.7" && rs[2].text === "8.8" && !!rs[1].error && rs[1].text === "",
+        JSON.stringify(rs));
+      // 取消：大量排隊後立即 cancel
+      var jobs = []; for (var i = 0; i < 30; i++) jobs.push(cellJob([String(i + 10)]));
+      var p = YF.ocr.recognizeCells(jobs);
+      var n = YF.ocr.cancel();
+      return p.then(function () { return { ok: false, n: n }; }, function (e) { return { ok: e && e.name === "AbortError", n: n, msg: e && e.message }; });
+    }).then(function (r) {
+      check("cancel() → AbortError", r.ok && r.n > 0, JSON.stringify(r));
+      return YF.ocr.recognize(cellJob(["9.25"]).bytes, { psm: "7" });
+    }).then(function (r) {
+      check("cancel 後仍可辨識", r.text === "9.25", JSON.stringify(r));
+    });
+  }
+
+  /* ---------- 4. 吞吐量 ---------- */
+  function testThroughput() {
+    var cjk = hasCJKFont();
+    var src = ["0.001", "0.012", "0.4", "0.2", "0.034", "0.029", "2.19", "0.13", "2.2", "19", "9", "4", "<10", "25"];
+    if (cjk) src = src.concat(["最大小時平均值", "日平均值", "示範新城", "甲乙社區活動中心", "丙丁", "戊己社區活動中心"]);
+    var jobs = [];
+    for (var k = 0; k < 2; k++) src.forEach(function (s) { jobs.push(cellJob([s], 30)); });
+    var t0 = now(), b0 = YF.ocr.info();
+    return YF.ocr.recognizeCells(jobs).then(function (rs) {
+      var ms = now() - t0, inf = YF.ocr.info();
+      var okN = rs.filter(function (r, i) { return norm(r.text) === norm(src[i % src.length]); }).length;
+      timing("吞吐 " + jobs.length + " 格", Math.round(ms) + " ms → " + (ms / jobs.length).toFixed(1) + " ms/格（牆鐘），單格辨識平均 " + inf.avgMs + " ms");
+      R.timings.synthPerCellWall = +(ms / jobs.length).toFixed(1);
+      check("吞吐測試正確率", okN >= jobs.length * 0.9, okN + "/" + jobs.length);
+    });
+  }
+
+  /* ---------- 5. PDF ---------- */
+  function inkInBox(img, b, grow) {
+    var bm = toBitmap(img.width, img.height, img.data, 160);
+    var g = grow || 8;
+    var r = { x0: Math.floor(b.x0 - g), y0: Math.floor(b.y0 - g), x1: Math.ceil(b.x1 + g), y1: Math.ceil(b.y1 + g) };
+    return inkBox(bm, r, 0);
+  }
+  function testPdf() {
+    var spec, bytes, doc;
+    return Promise.all([fetchBytes("fixtures/ocr_text.pdf"), fetch("fixtures/ocr_text.json").then(function (r) { return r.json(); })])
+      .then(function (a) {
+        bytes = a[0]; spec = a[1];
+        var len = bytes.byteLength;
+        return YF.pdf.open(bytes).then(function (d) {
+          doc = d;
+          check("pdf.open() 不轉移呼叫端資料", bytes.byteLength === len, len + " → " + bytes.byteLength);
+          check("pdf numPages", d.numPages === 3, String(d.numPages));
+          return d.getPage(1);
+        });
+      }).then(function (pg) {
+        var s = 200 / 72, ps = spec.pages[0];
+        var expChars = ps.items.reduce(function (n, it) { return n + it.str.replace(/\s+/g, "").length; }, 0);
+        check("page1 尺寸 (pt)", Math.abs(pg.widthPt - ps.w) < 0.01 && Math.abs(pg.heightPt - ps.h) < 0.01, pg.widthPt + "×" + pg.heightPt);
+        check("page1 textCharCount", pg.textCharCount === expChars, pg.textCharCount + " / 預期 " + expChars);
+        return pg.textItems(200).then(function (items) {
+          var strs = items.map(function (i) { return i.str; });
+          check("textItems 字串（含非內嵌中文字型，需 cmaps）", ps.items.every(function (e) { return strs.indexOf(e.str) >= 0; }),
+            JSON.stringify(strs));
+          ps.items.forEach(function (e) {
+            var it = items.filter(function (i) { return i.str === e.str; })[0];
+            if (!it) return;
+            var ok, det;
+            if (!e.rot) {
+              var bx0 = e.x * s, bx1 = (e.x + e.w) * s, base = (ps.h - e.y) * s;
+              ok = Math.abs(it.x0 - bx0) < 1.5 && Math.abs(it.x1 - bx1) < 1.5 && it.y0 < base && it.y1 > base &&
+                base - it.y0 > e.size * s * 0.6 && it.y1 - base < e.size * s * 0.35 && Math.abs(it.fontSize - e.size * s) < 0.5;
+              det = JSON.stringify(it) + " 預期 x " + bx0.toFixed(1) + "–" + bx1.toFixed(1) + " 基線 " + base.toFixed(1);
+            } else {
+              var bx = e.x * s, by0 = (ps.h - e.y - e.w) * s, by1 = (ps.h - e.y) * s;
+              ok = Math.abs(it.y0 - by0) < 1.5 && Math.abs(it.y1 - by1) < 1.5 && it.x0 < bx && it.x1 > bx && it.angle === -90;
+              det = JSON.stringify(it) + " 預期 y " + by0.toFixed(1) + "–" + by1.toFixed(1) + " 基線 x " + bx.toFixed(1);
+            }
+            check("textItems 位置「" + e.str + "」", ok, det);
+          });
+          return pg.textItems(100).then(function (half) {
+            var a = items[0], b = half[0];
+            check("textItems(100) = 200dpi 座標的一半", Math.abs(a.x0 / 2 - b.x0) < 0.02 && Math.abs(a.y1 / 2 - b.y1) < 0.02, JSON.stringify(b));
+            var t0 = now();
+            return pg.render(200).then(function (img) {
+              timing("PDF 第1頁 render 200dpi", Math.round(now() - t0) + " ms");
+              check("render(200) 尺寸", img.width === 1654 && img.height === 2339 && img.dpi === 200 && img.data.length === img.width * img.height * 4,
+                img.width + "×" + img.height + " dpi " + img.dpi);
+              check("render 白底", img.data[0] === 255 && img.data[1] === 255 && img.data[3] === 255, Array.prototype.slice.call(img.data, 0, 4).join(","));
+              check("render 使用 OffscreenCanvas（不支援時自動改用 <canvas>）", img.via === (typeof OffscreenCanvas === "function" ? "offscreen" : "canvas"), img.via);
+              var inkA = 0; for (var q = 0; q < img.data.length; q += 4) if (img.data[q] < 128) inkA++;
+              var pRender2 = pg.render(200, { offscreen: false }).then(function (img2) {
+                var inkB = 0; for (var q2 = 0; q2 < img2.data.length; q2 += 4) if (img2.data[q2] < 128) inkB++;
+                check("render <canvas> 路徑與 OffscreenCanvas 結果一致", img2.via === "canvas" && img2.width === img.width &&
+                  img2.height === img.height && Math.abs(inkA - inkB) <= inkA * 0.01, img2.via + " 墨點 " + inkA + " / " + inkB);
+              });
+              items.forEach(function (it) {
+                var isCJK = /[一-鿿]/.test(it.str);
+                var ink = inkInBox(img, it);
+                // 非內嵌中文字型由系統字型代替，字身可能略高於 PDF 宣告的 ascent → 容許 6px
+                var tol = isCJK ? 6 : 3;
+                var ok = ink.count > 30 && ink.x0 >= it.x0 - tol && ink.x1 <= it.x1 + tol && ink.y0 >= it.y0 - tol && ink.y1 <= it.y1 + tol &&
+                  (ink.x1 - ink.x0) >= (it.x1 - it.x0) * 0.6 * (it.angle ? 0 : 1) && (ink.y1 - ink.y0) >= (it.y1 - it.y0) * 0.6 * (it.angle ? 1 : 0);
+                if (isCJK && !ok && ink.count === 0) { skip("render 墨跡在文字框內「" + it.str + "」", "系統沒有對應中文字型，pdf.js 未畫出"); return; }
+                check("render 墨跡在文字框內「" + it.str + "」", ok, JSON.stringify(ink));
+              });
+              return pRender2;
+            });
+          });
+        });
+      }).then(function () {
+        return doc.getPage(2).then(function (pg) {
+          var ps = spec.pages[1];
+          check("page2 /Rotate 90 尺寸", pg.rotate === 90 && Math.abs(pg.widthPt - ps.h) < 0.01 && Math.abs(pg.heightPt - ps.w) < 0.01,
+            pg.widthPt + "×" + pg.heightPt + " rotate " + pg.rotate);
+          return Promise.all([pg.textItems(200), pg.render(200)]).then(function (a) {
+            var it = a[0][0], img = a[1];
+            check("page2 render 尺寸", img.width === 1654 && img.height === 2339, img.width + "×" + img.height);
+            var ink = it ? inkInBox(img, it) : { count: 0 };
+            check("page2 旋轉頁文字框與影像對齊「0.029」", !!it && it.str === "0.029" && it.angle === 90 &&
+              (it.y1 - it.y0) > (it.x1 - it.x0) && ink.count > 30 && ink.x0 >= it.x0 - 3 && ink.x1 <= it.x1 + 3 &&
+              ink.y0 >= it.y0 - 3 && ink.y1 <= it.y1 + 3 && (ink.y1 - ink.y0) > (it.y1 - it.y0) * 0.6, JSON.stringify(it) + " ink " + JSON.stringify(ink));
+          });
+        });
+      }).then(function () {
+        return doc.getPage(3).then(function (pg) {
+          return Promise.all([pg.textItems(200), pg.render(200)]).then(function (a) {
+            var it = a[0][0], img = a[1];
+            var ink = it ? inkInBox(img, it) : { count: 0 };
+            check("page3 橫式頁", img.width === 2339 && img.height === 1654 && it && it.str === "LAND 12.5" && ink.count > 30 &&
+              ink.x0 >= it.x0 - 3 && ink.x1 <= it.x1 + 3, img.width + "×" + img.height + " " + JSON.stringify(it));
+          });
+        });
+      }).then(function () {
+        return Promise.all([
+          doc.getPage(0).then(function () { return "resolved"; }, function (e) { return e.name + ":" + e.message; }),
+          doc.getPage(4).then(function () { return "resolved"; }, function (e) { return e.name + ":" + e.message; }),
+          doc.getPage(1).then(function (a) { return doc.getPage(1).then(function (b) { return a === b; }); })
+        ]).then(function (r) {
+          check("getPage 範圍檢查", /^RangeError/.test(r[0]) && /^RangeError/.test(r[1]), r[0] + " | " + r[1]);
+          check("getPage 快取同一物件", r[2] === true, String(r[2]));
+          return doc.getInfo();
+        });
+      }).then(function (inf) {
+        check("getInfo()", /ReportLab/.test(inf.producer), JSON.stringify(inf));
+        return doc.destroy();
+      }).then(function () {
+        return doc.getPage(1).then(function () { return "resolved"; }, function (e) { return e.message; });
+      }).then(function (m) {
+        check("destroy 後 getPage 拒絕", m !== "resolved", m);
+        return fetchBytes("fixtures/ocr_pw.pdf").then(function (b) { return YF.pdf.open(b); })
+          .then(function () { return "resolved"; }, function (e) { return e.code + ":" + e.message; });
+      }).then(function (m) {
+        check("有密碼 PDF → code password", /^password:/.test(m) && /密碼/.test(m), m);
+        var junk = new TextEncoder().encode("%PDF-1.4\nthis is not really a pdf\n%%EOF");
+        return Promise.all([
+          YF.pdf.open(junk).then(function () { return "resolved"; }, function (e) { return e.code + ":" + e.message; }),
+          YF.pdf.open(new Uint8Array(0)).then(function () { return "resolved"; }, function (e) { return e.code + ":" + e.message; }),
+          YF.pdf.open("abc").then(function () { return "resolved"; }, function (e) { return e.message; })
+        ]);
+      }).then(function (m) {
+        check("壞 PDF → code invalid", /^invalid:/.test(m[0]), m[0]);
+        check("空 PDF / 非位元組 → 錯誤", /^invalid:/.test(m[1]) && m[2] !== "resolved", m[1] + " | " + m[2]);
+      });
+  }
+
+  /* ---------- 6. 真實樣本（僅本機 test_data/fill/ 存在時） ---------- */
+  function readPBM(b) {
+    var pos = 0, tok = [];
+    while (tok.length < 3) {
+      while (b[pos] === 0x20 || b[pos] === 0x0A || b[pos] === 0x0D || b[pos] === 0x09) pos++;
+      if (b[pos] === 0x23) { while (b[pos] !== 0x0A) pos++; continue; }
+      var s = ""; while (b[pos] > 0x20) s += String.fromCharCode(b[pos++]);
+      tok.push(s);
+    }
+    pos++;
+    var w = +tok[1], h = +tok[2], rb = (w + 7) >> 3, d = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) d[y * w + x] = (b[pos + y * rb + (x >> 3)] >> (7 - (x & 7))) & 1;
+    return { width: w, height: h, data: d };
+  }
+  function cellJobsFromPage(bm, cells) {
+    var jobs = [], idx = [];
+    cells.forEach(function (c, i) {
+      var ib = inkBox(bm, c.bbox, 4);
+      if (ib.count < 10) return;
+      var th = ib.y1 - ib.y0 + 1;
+      jobs.push({ bytes: cropPBM(bm, ib, 12), psm: th > 42 ? "6" : "7" });
+      idx.push(i);
+    });
+    return { jobs: jobs, idx: idx };
+  }
+  function testReal() {
+    if (Q.get("real") === "0") { skip("真實樣本", "real=0"); return Promise.resolve(); }
+    return fetch("../../test_data/fill/fx_adata.json", { cache: "no-store" }).then(function (r) {
+      if (!r.ok) { skip("真實樣本", "本機沒有 test_data/fill/（正常：真實資料不在公開 repo）"); return null; }
+      return r.json();
+    }).then(function (fx) {
+      if (!fx) return;
+      var p3 = fx.filter(function (p) { return p.page === 3; })[0];
+      return fetch("../../test_data/fill/ocr_expected.json").then(function (r) { return r.ok ? r.json() : []; })
+        .catch(function () { return []; }).then(function (w) {
+          R.realExpected = Array.isArray(w) ? w : [];
+          return fetchBytes("../../test_data/fill/pages/adata_p03.pbm");
+        }).then(function (b) {
+        var bm = readPBM(b);
+        check("真實 A data 第3頁 PBM", bm.width === p3.width && bm.height === p3.height, bm.width + "×" + bm.height);
+        var cells = [];
+        p3.tables.forEach(function (t) { t.cells.forEach(function (c) { cells.push(c); }); });
+        var cj = cellJobsFromPage(bm, cells);
+        var t0 = now();
+        return YF.ocr.recognizeCells(cj.jobs).then(function (rs) {
+          var ms = now() - t0;
+          R.timings.realPerCellWall = +(ms / cj.jobs.length).toFixed(1);
+          timing("真實第3頁 " + cj.jobs.length + " 格", Math.round(ms) + " ms → " + (ms / cj.jobs.length).toFixed(1) + " ms/格（牆鐘）");
+          var agree = 0, got = {};
+          cj.idx.forEach(function (ci, k) {
+            var c = cells[ci], t = rs[k].text;
+            if (norm(t) === norm(c.text)) agree++;
+            got[c.r0 + "," + c.c0 + "," + c.bbox.y0] = { exp: c.text, got: t, conf: rs[k].conf };
+          });
+          check("真實第3頁與原型 OCR 結果一致率", agree >= cj.jobs.length * 0.85, agree + "/" + cj.jobs.length);
+          // 已知正確值（人工確認）存於 test_data/fill/ocr_expected.json（真實資料，不進 repo）
+          var want = (R.realExpected || []);
+          want.forEach(function (w) {
+            var hits = Object.keys(got).filter(function (k) { return got[k].exp === w[0]; });
+            if (!hits.length) { skip("真實儲存格「" + w[0] + "」", "原型結果中找不到此格"); return; }
+            var ok = hits.every(function (k) { return norm(got[k].got) === norm(w[1]); });
+            check("真實儲存格「" + w[0] + "」×" + hits.length, ok, hits.map(function (k) { return JSON.stringify(got[k]); }).join(" "));
+          });
+          var diffs = Object.keys(got).filter(function (k) { return norm(got[k].got) !== norm(got[k].exp); })
+            .map(function (k) { return got[k].exp + "→" + got[k].got; });
+          R.notes.push("page3 diffs vs prototype: " + diffs.join(" | "));
+          // 數字 worker 對照
+          var numIdx = [];
+          cj.idx.forEach(function (ci, k) { if (/^[<>]?\d+(\.\d+)?$/.test(cells[ci].text)) numIdx.push(k); });
+          var t1 = now();
+          return Promise.all(numIdx.map(function (k) { return YF.ocr.recognize(cj.jobs[k].bytes, { numeric: true }); })).then(function (nr) {
+            var okN = 0, okMain = 0, bad = [];
+            numIdx.forEach(function (k, j) {
+              var exp = cells[cj.idx[k]].text;
+              if (nr[j].text === exp) okN++; else bad.push(exp + "→" + nr[j].text);
+              if (norm(rs[k].text) === exp) okMain++;
+            });
+            timing("真實數字格 numeric " + numIdx.length + " 格", Math.round(now() - t1) + " ms");
+            check("真實數字格：數字 worker 正確率", okN >= numIdx.length * 0.9, okN + "/" + numIdx.length + "（一般 worker " + okMain + "/" + numIdx.length + "）" + (bad.length ? " 錯：" + bad.join(", ") : ""));
+          });
+        });
+      }).then(function () { return testRealOdor(); });
+    });
+  }
+  function testRealOdor() {
+    return Promise.all([fetchBytes("../../test_data/fill/odor.pdf"), fetch("../../test_data/fill/fx_odor.json").then(function (r) { return r.json(); })])
+      .then(function (a) {
+        var t0 = now();
+        return YF.pdf.open(a[0]).then(function (doc) {
+          timing("odor.pdf open", Math.round(now() - t0) + " ms");
+          check("odor.pdf 頁數", doc.numPages === a[1].length, doc.numPages + " 頁");
+          return doc.getPage(1).then(function (pg) {
+            var t1 = now();
+            return pg.render(200).then(function (img) {
+              var ms = Math.round(now() - t1);
+              timing("odor p1 render 200dpi", ms + " ms");
+              R.timings.odorRenderMs = ms;
+              var bm = toBitmap(img.width, img.height, img.data, 160), ink = 0;
+              for (var i = 0; i < bm.data.length; i++) ink += bm.data[i];
+              check("odor p1 render", Math.abs(img.width - 1654) <= 1 && Math.abs(img.height - 2339) <= 1 && ink / bm.data.length > 0.01,
+                img.width + "×" + img.height + " 文字頁字數 " + pg.textCharCount + " 墨點 " + (100 * ink / bm.data.length).toFixed(1) + "%");
+              // 實測值 ①–④ 儲存格（fx_odor 第1頁第7欄）
+              var t = a[1][0].tables[0];
+              var vals = t.cells.filter(function (c) { return c.c0 === 7 && c.r0 >= 4 && c.r0 <= 10 && /\d/.test(c.text); })
+                .sort(function (x, y) { return x.r0 - y.r0; });
+              var cj = cellJobsFromPage(bm, vals);
+              return YF.ocr.recognizeCells(cj.jobs).then(function (rs) {
+                var got = rs.map(function (r) { return r.text; });
+                check("odor 實測值 ①–④（pdf.js 繪製 → OCR）", got.join(",") === "25,25,<10,20", JSON.stringify(got));
+              });
+            });
+          }).then(function () { return doc.destroy(); });
+        });
+      });
+  }
+
+  /* ---------- 7. worker 數量比較（?bench=1） ---------- */
+  function bench() {
+    if (Q.get("bench") !== "1") return Promise.resolve();
+    var counts = (Q.get("benchWorkers") || "1,2,3,4").split(",").map(Number);
+    var src = ["0.001", "0.012", "0.4", "2.19", "0.034", "<10", "25", "SO2 (ppm)"];
+    if (hasCJKFont()) src = src.concat(["最大小時平均值", "日平均值", "示範新城", "甲乙社區活動中心"]);
+    var jobs = []; for (var k = 0; k < 5; k++) src.forEach(function (s) { jobs.push(cellJob([s], 30)); });
+    var out = {};
+    var chain = Promise.resolve();
+    counts.forEach(function (n) {
+      chain = chain.then(function () { return YF.ocr.terminate(); }).then(function () {
+        var t0 = now();
+        return YF.ocr.init({ workers: n }).then(function () {
+          var ti = Math.round(now() - t0), t1 = now();
+          return YF.ocr.recognizeCells(jobs).then(function () {
+            var ms = now() - t1;
+            out[n] = { initMs: ti, cells: jobs.length, msPerCell: +(ms / jobs.length).toFixed(1) };
+            timing("bench " + n + " workers", "init " + ti + " ms，" + out[n].msPerCell + " ms/格");
+          });
+        });
+      });
+    });
+    return chain.then(function () { R.timings.bench = out; check("bench 完成", true, JSON.stringify(out)); });
+  }
+
+  /* ---------- 8. 重新初始化（IndexedDB 快取已有模型） ---------- */
+  function testReinit() {
+    var t0 = now();
+    return YF.ocr.terminate().then(function () {
+      check("terminate() 後狀態重置", !YF.ocr.info().ready && YF.ocr.info().workers === 0, JSON.stringify(YF.ocr.info()));
+      var p = YF.ocr.recognize(cellJob(["3.14"]).bytes, { psm: "7" });   // 未 init 直接辨識 → 自動 init（預設參數）
+      return p.then(function (r) {
+        var ms = Math.round(now() - t0);
+        timing("自動 init + 1 格（快取）", ms + " ms");
+        R.timings.warmInitMs = ms;
+        check("terminate 後 recognize 自動重新 init", r.text === "3.14" && YF.ocr.info().ready, JSON.stringify(r) + " " + JSON.stringify(YF.ocr.info()));
+        return YF.ocr.terminate();
+      }).then(function () {
+        // 不支援 wasm SIMD 的瀏覽器會用 tesseract-core-lstm.wasm.js：強制載入驗證
+        var t1 = now();
+        return YF.ocr.init({ workers: 1, core: "nosimd" }).then(function () {
+          var ti = Math.round(now() - t1), jobs = [cellJob(["0.034"]), cellJob(["SO2 (ppm)"])];
+          if (hasCJKFont()) jobs.push(cellJob(["示範新城"]));
+          var t2 = now();
+          return YF.ocr.recognizeCells(jobs).then(function (rs) {
+            var ms = (now() - t2) / jobs.length;
+            timing("非 SIMD 核心", "init " + ti + " ms，" + ms.toFixed(0) + " ms/格（1 worker）");
+            var exp = ["0.034", "SO2 (ppm)", "示範新城"];
+            check("非 SIMD 核心（tesseract-core-lstm）可辨識", rs.every(function (r, i) { return norm(r.text) === norm(exp[i]); }), JSON.stringify(rs));
+            return YF.ocr.terminate();
+          });
+        });
+      });
+    });
+  }
+
+  function run() {
+    var t0 = now();
+    var steps = [testInit, testSynthetic, testInputs, testThroughput, testPdf, testReal, testReinit, bench];
+    var chain = Promise.resolve();
+    steps.forEach(function (fn) {
+      chain = chain.then(fn).catch(function (e) {
+        check("步驟 " + fn.name + " 例外", false, (e && e.stack) || String(e));
+      });
+    });
+    return chain.then(function () {
+      R.timings.totalMs = Math.round(now() - t0);
+      R.info = YF.ocr.info();
+      R.done = true;
+      var b = document.getElementById("banner");
+      b.className = R.fail ? "fail" : "pass";
+      b.textContent = (R.fail ? "失敗 " + R.fail + " 項" : "全部通過") + "（通過 " + R.pass + "、略過 " + R.skip + "，" + Math.round(R.timings.totalMs / 1000) + " 秒）";
+    });
+  }
+  window.runOcrTests = run;
+  if (Q.get("auto") !== "0") run();
+  else { document.getElementById("banner").textContent = "auto=0：未自動執行"; }
+})();
+</script>
+</body>
+</html>

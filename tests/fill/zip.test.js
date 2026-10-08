@@ -239,10 +239,10 @@ test("讀取：未設 UTF-8 旗標的 UTF-8 / Big5 檔名、Info-ZIP Unicode 路
     { nameBytes: ENC.encode("報告/異味.xml"), data: "<x/>", method: 0 },
     { nameBytes: big5, data: "big5", method: 0 },
     { nameBytes: legacy, data: "pdf", method: 0, centralExtra: up },
-    { name: "utf8flag/嘉禾.txt", data: "ok", method: 8, utf8Flag: true }
+    { name: "utf8flag/示範.txt", data: "ok", method: 8, utf8Flag: true }
   ]);
   var zip = await Z.read(bytes);
-  assert.deepStrictEqual(zip.names, ["報告/異味.xml", "中文.txt", "監測報告.pdf", "utf8flag/嘉禾.txt"]);
+  assert.deepStrictEqual(zip.names, ["報告/異味.xml", "中文.txt", "監測報告.pdf", "utf8flag/示範.txt"]);
   assert.strictEqual(await zip.text("中文.txt"), "big5");
   assert.strictEqual(await zip.text("監測報告.pdf"), "pdf");
   // 複製時保留原檔名位元組

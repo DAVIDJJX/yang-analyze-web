@@ -165,7 +165,7 @@ function sjsCfb(files) {
 }
 function sjsBook(bookType) {
   var wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["測站", "SO2"], ["嘉禾新城", 0.001]]), "S1");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["測站", "SO2"], ["示範新城", 0.001]]), "S1");
   return Buffer.from(XLSX.write(wb, { bookType: bookType, type: "array" }));
 }
 
@@ -574,7 +574,7 @@ test("XML：Word 2003 XML / 一般 XML", function () {
 });
 var BIG5_ROW = Buffer.from([0xB4, 0xFA, 0xAF, 0xB8, 0x2C, 0xB9, 0xC5, 0xAB, 0xD7, 0x0D, 0x0A]);   // 「測站,溫度」
 test("CSV：BOM / Big5 / UTF-16 / 分隔符號 / 單欄 / 偽裝成 .xls", function () {
-  var csv = "測站,SO2,NO2\r\n嘉禾新城,0.001,0.012\r\n大美社區,0.001,0.008\r\n";
+  var csv = "測站,SO2,NO2\r\n示範新城,0.001,0.012\r\n甲乙社區,0.001,0.008\r\n";
   var r = expectKind(Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(csv)]), "a.csv", "csv", { mismatch: false, route: "sheet" });
   assert.strictEqual(r.meta.encoding, "utf-8"); assert.strictEqual(r.meta.bom, true); assert.strictEqual(r.meta.delimiter, ",");
   assert.ok(/BOM/.test(r.detail));
@@ -583,7 +583,7 @@ test("CSV：BOM / Big5 / UTF-16 / 分隔符號 / 單欄 / 偽裝成 .xls", funct
   r = expectKind(big5, "b.csv", "csv"); assert.strictEqual(r.meta.encoding, "big5"); assert.ok(/Big5/.test(r.detail));
   r = expectKind(big5, "", "csv"); assert.strictEqual(r.meta.encoding, "big5");
   // Excel「Unicode 文字」：UTF-16LE + BOM + Tab
-  var u16 = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from("測站\tSO2\r\n嘉禾\t0.001\r\n大美\t0.002\r\n", "utf16le")]);
+  var u16 = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from("測站\tSO2\r\n示範\t0.001\r\n甲乙\t0.002\r\n", "utf16le")]);
   r = expectKind(u16, "u.txt", "csv", { mismatch: false }); assert.strictEqual(r.meta.encoding, "utf-16le"); assert.strictEqual(r.meta.delimiter, "\t");
   var u16be = Buffer.from("A\tB\r\n1\t2\r\n3\t4\r\n", "utf16le").swap16();
   r = expectKind(u16be, "", "csv"); assert.strictEqual(r.meta.encoding, "utf-16be");
@@ -738,7 +738,7 @@ test("效能：50 MB", function () {
   timed("pdf", pdf, "big.pdf", "pdf");
   var xdwBig = Buffer.concat([XDW_HDR, tlv(0x61, tlv(0x64, Buffer.alloc(MB50, 1)))]);
   timed("xdw", xdwBig, "big.xdw", "xdw");
-  var csv = Buffer.alloc(MB50); var row = Buffer.from("嘉禾新城,0.001,0.012\r\n"); for (i = 0; i + row.length <= MB50; i += row.length) row.copy(csv, i);
+  var csv = Buffer.alloc(MB50); var row = Buffer.from("示範新城,0.001,0.012\r\n"); for (i = 0; i + row.length <= MB50; i += row.length) row.copy(csv, i);
   timed("csv", csv, "big.csv", "csv");
   var cfb = makeCfb([{ name: "WordDocument", data: pad(fib(0), MB50) }], { dirLast: true });
   timed("cfb-dirLast", cfb, "big.doc", "doc");

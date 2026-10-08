@@ -6,7 +6,7 @@
  *    另以既有水質/空氣/噪音模組解析器補充精確數值）。
  *  - 待填表格：Word（.docx）、Excel（.xlsx/.xlsm/.xls）。
  * 掃描頁流程：解碼 → 二值化 → 表格格線偵測（grid.js）→ 逐格 OCR（ocr.js）
- *            → 表格外文字列 OCR（頁面脈絡，如「監測位置：嘉禾新城」）。
+ *            → 表格外文字列 OCR（頁面脈絡，如「監測位置：示範新城」）。
  * 辨識結果依檔案 SHA-256 快取（呼叫端提供 cache.get/put），同檔再次上傳免重算。
  * ========================================================================= */
 (function (root) {
@@ -52,6 +52,9 @@
     }).filter(Boolean).join("\n");
     // 中文字之間的空白（OCR 常見）去除
     return s.replace(/([㐀-鿿豈-﫿])\s+(?=[㐀-鿿豈-﫿])/g, "$1");
+  }
+  function plainBox(b) {
+    return b ? { x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 } : null;
   }
   /* 「10:00 ~ 11:00」「10:00-11:00」「10時~11時」等時段文字 */
   function isTimeRangeText(s) {
@@ -102,7 +105,8 @@
         cells: []
       };
       (t.cells || []).forEach(function (c) {
-        var cell = { r0: c.r0, r1: c.r1, c0: c.c0, c1: c.c1, text: "", conf: null, bbox: c.bbox, ref: null };
+        var cell = { r0: c.r0, r1: c.r1, c0: c.c0, c1: c.c1, text: "", conf: null, bbox: plainBox(c.bbox), ref: null };
+        if (c.frame || (c.bbox && c.bbox.frame)) cell.frame = c.frame || c.bbox.frame;   // 歪斜掃描的儲存格框（裁切用）
         ft.cells.push(cell);
         var ink = G.cellInk(bin, mask, c.bbox, 3);
         if (!ink || ink.count < MIN_INK || !ink.bbox) return;
@@ -342,17 +346,18 @@
             return pdf.getPage(n).then(function (pg) {
               return Promise.all([pg.render(DPI), pg.textItems(DPI)]).then(function (res) {
                 var rgba = res[0], items = res[1] || [];
+                var dpi = rgba.dpi || DPI;      // 超大頁面時 pdfread 會自動降低 dpi（座標與文字一致）
                 var bin = YF.raster.binarize(rgba.data, rgba.width, rgba.height);
-                doc.pages.push({ index: n, width: rgba.width, height: rgba.height, dpi: DPI });
+                doc.pages.push({ index: n, width: rgba.width, height: rgba.height, dpi: dpi });
                 var chars = items.reduce(function (s, it) { return s + (it.str ? it.str.trim().length : 0); }, 0);
                 if (chars >= 30) {
                   vector++;
-                  processVectorPdfPage(bin, items, n, DPI).forEach(function (t) { doc.tables.push(t); });
+                  processVectorPdfPage(bin, items, n, dpi).forEach(function (t) { doc.tables.push(t); });
                   return null;
                 }
                 scanned++;
                 if (!ocrReady(doc)) return null;
-                return processBitmapPage(bin, n, DPI, doc, opts).then(function (r) {
+                return processBitmapPage(bin, n, dpi, doc, opts).then(function (r) {
                   r.tables.forEach(function (t) { doc.tables.push(t); });
                 });
               });
@@ -368,28 +373,43 @@
     });
   }
 
-  function processImage(bytes, doc, opts, type) {
-    var pagesP;
-    if (type.kind === "tif") {
-      var bms = (YF.ccitt && YF.ccitt.decodeTiff) ? YF.ccitt.decodeTiff(bytes) : [];
-      if (bms && bms.length) pagesP = Promise.resolve(bms);
-      else pagesP = YF.raster.decodeImageBytes(bytes, "image/tiff").then(function (rgba) { return [toBitmap(rgba)]; });
-    } else {
-      pagesP = YF.raster.decodeImageBytes(bytes, type.mime || null).then(function (rgba) { return [toBitmap(rgba)]; });
+  /* 影像檔 → [{bin, dpi}]（多頁 TIFF 取全部頁；大圖會在解碼時縮小，dpi 依比例調整） */
+  function decodeImagePages(bytes, type) {
+    var metaDpi = (type.meta && type.meta.dpi >= 72 && type.meta.dpi <= 1200) ? type.meta.dpi : null;
+    if (type.kind === "tif" && YF.ccitt && YF.ccitt.decodeTiff) {
+      var bms = [];
+      try { bms = YF.ccitt.decodeTiff(bytes) || []; } catch (e) { bms = []; }
+      if (bms.length) {
+        return Promise.resolve(bms.map(function (bm) {
+          return { bin: bm, dpi: bm.dpi || bm.dpiX || metaDpi || estimateDpi(bm) };
+        }));
+      }
     }
-    return pagesP.then(function (bins) {
-      bins = (bins || []).filter(Boolean);
-      doc.stats.pages = bins.length;
-      doc._bitmaps = bins;
-      doc.info = "影像：" + bins.length + " 頁" + (bins[0] ? "（" + bins[0].width + "×" + bins[0].height + "）" : "");
-      if (!ocrReady(doc)) return null;
+    return YF.raster.decodeImageBytes(bytes, type.mime || null).then(function (res) {
+      var scale = res.scale || 1;
+      var list = res.pages && res.pages.length ? res.pages : [res];
+      return list.map(function (pg) {
+        var bin = pg.bitmap || (pg.data && pg.data.length === pg.width * pg.height ? pg : YF.raster.binarize(pg.data, pg.width, pg.height));
+        var dpi = metaDpi ? Math.round(metaDpi * scale) : estimateDpi(bin);
+        return { bin: bin, dpi: dpi };
+      });
+    });
+  }
+
+  function processImage(bytes, doc, opts, type) {
+    return decodeImagePages(bytes, type).then(function (pages) {
+      pages = (pages || []).filter(function (p) { return p && p.bin; });
+      doc.stats.pages = pages.length;
+      doc._bitmaps = pages.map(function (p) { return p.bin; });
+      doc.info = "影像：" + pages.length + " 頁" + (pages[0] ? "（" + pages[0].bin.width + "×" + pages[0].bin.height + "）" : "");
+      pages.forEach(function (p, i) { doc.pages.push({ index: i + 1, width: p.bin.width, height: p.bin.height, dpi: p.dpi }); });
+      if (!pages.length || !ocrReady(doc)) return null;
       var chain = Promise.resolve();
-      bins.forEach(function (bin, i) {
+      pages.forEach(function (p, i) {
         chain = chain.then(function () {
           checkAbort(opts);
-          var dpi = (type.meta && type.meta.dpi && type.meta.dpi >= 72 && type.meta.dpi <= 1200) ? type.meta.dpi : estimateDpi(bin);
-          doc.pages.push({ index: i + 1, width: bin.width, height: bin.height, dpi: dpi });
-          return processBitmapPage(bin, i + 1, dpi, doc, opts).then(function (r) {
+          progress(opts, "page", i, pages.length, "第 " + (i + 1) + "/" + pages.length + " 頁");
+          return processBitmapPage(p.bin, i + 1, p.dpi, doc, opts).then(function (r) {
             r.tables.forEach(function (t) { doc.tables.push(t); });
           });
         });
@@ -616,19 +636,14 @@
       }
       if (type.route === "image") {
         if (doc._bitmaps) return Promise.resolve(doc._bitmaps[n - 1] || null);
-        return processImageBitmaps(bytes, type).then(function (bins) { doc._bitmaps = bins; return bins[n - 1] || null; });
+        return decodeImagePages(bytes, type).then(function (pages) {
+          doc._bitmaps = pages.map(function (p) { return p.bin; });
+          return doc._bitmaps[n - 1] || null;
+        });
       }
       return Promise.resolve(null);
     };
   }
-  function processImageBitmaps(bytes, type) {
-    if (type.kind === "tif" && YF.ccitt && YF.ccitt.decodeTiff) {
-      var bms = YF.ccitt.decodeTiff(bytes);
-      if (bms && bms.length) return Promise.resolve(bms);
-    }
-    return YF.raster.decodeImageBytes(bytes, type.mime || null).then(function (rgba) { return [toBitmap(rgba)]; });
-  }
-
   /* 頁面格線遮罩（裁切儲存格時去除框線用），每頁算一次 */
   function pageMask(doc, n, bin) {
     doc._masks = doc._masks || {};
@@ -701,7 +716,7 @@
     return doc.getPageBitmap(table.page).then(function (bin) {
       if (!bin) return null;
       var mask = pageMask(doc, table.page, bin);
-      var ink = YF.grid.cellInk(bin, mask, cell.bbox, 3);
+      var ink = YF.grid.cellInk(bin, mask, cell.bbox, 3, cell.frame ? { frame: cell.frame } : undefined);
       if (!ink || !ink.bbox || ink.count < MIN_INK) return null;
       return YF.raster.encodePBM(bin, ink.bbox, 12, mask);
     }).catch(function () { return null; });

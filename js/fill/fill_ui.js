@@ -530,6 +530,16 @@
     if (!YF.match || !YF.match.unmatchedGroups || !S.slots.length) { box.hidden = true; return; }
     var groups = [];
     try { groups = YF.match.unmatchedGroups(S.slots, S.facts, S.assignments) || []; } catch (e) { groups = []; }
+    // 只列出「還有空格待填」的項目（例：臭氣），其餘未使用的原始數值不打擾使用者
+    var openItems = {};
+    S.assignments.forEach(function (a) {
+      var sl = S.slotById[a.slotId];
+      if (sl && (!a.value || a.status === "mapping")) openItems[sl.item] = true;
+    });
+    groups = groups.filter(function (g) {
+      var it = g.item || (g.facts && g.facts[0] && g.facts[0].item);
+      return !it || openItems[it];
+    });
     var mapped = Object.keys(S.aliases).filter(function (k) {
       return S.facts.some(function (f) { return f.stationKey === k; });
     });
@@ -678,16 +688,31 @@
       srcTd.appendChild(el("span", "fill-note-sm", a.status === "mapping" ? "請在上方「測點對應」選擇" : "原始資料中找不到"));
     }
     var cands = (a.candidates || []).filter(function (c) { return S.factById[c.factId]; });
-    if (cands.length > 1) {
+    // 待對應測點：列出同項目、未標測站的數值，可直接逐格指定
+    if (!a.factId && a.status === "mapping") {
+      cands = S.facts.filter(function (x) { return x.item === slot.item && !x.station && x.pointNo; })
+        .map(function (x) { return { factId: x.id, value: x.value }; });
+    }
+    if (cands.length > 1 || (!a.factId && cands.length)) {
       var sel = el("select", "fill-alt");
+      if (!a.factId) sel.appendChild(new Option(a.status === "mapping" ? "— 直接選擇測點 —" : "— 選擇來源 —", ""));
       cands.forEach(function (c) {
         var cf = S.factById[c.factId];
-        var lab = c.value + "｜" + cf.docName + " " + (cf.where || "") + (c.agrees === false ? "（不一致）" : "");
+        var lab = c.value + "｜" + (cf.station || (cf.pointNo ? "第" + cf.pointNo + "點" : "")) + " " + cf.docName + " " +
+          (cf.where || "") + (c.agrees === false ? "（不一致）" : "");
         sel.appendChild(new Option(lab, c.factId));
       });
       sel.value = a.factId || "";
       sel.title = "其他來源";
       sel.addEventListener("change", function () {
+        if (!sel.value) return;
+        var pickedFact = S.factById[sel.value];
+        if (a.status === "mapping" && pickedFact && !(a.candidates || []).some(function (c) { return c.factId === sel.value; })) {
+          // 未列入候選的測點：直接以手動值帶入並記下來源
+          S.manual[slotKey(slot)] = pickedFact.value;
+          renderAll();
+          return;
+        }
         S.picks[slotKey(slot)] = sel.value;
         delete S.manual[slotKey(slot)];
         recompute();
@@ -699,7 +724,9 @@
     var imgTd = el("td", "fill-thumb");
     if (f && f.bbox && f.page) {
       var img = el("img");
-      img.alt = "原始影像";
+      img.alt = "";
+      img.setAttribute("aria-label", "原始影像");
+      img.src = BLANK_IMG;
       img.dataset.fact = f.id;
       img.className = "fill-thumb-img loading";
       imgTd.appendChild(img);
@@ -713,6 +740,7 @@
     return tr;
   }
 
+  var BLANK_IMG = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
   var thumbQueue = [], thumbBusy = false, thumbCache = {};
   function onThumbVisible(entries) {
     entries.forEach(function (en) {
