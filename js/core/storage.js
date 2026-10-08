@@ -7,12 +7,15 @@
  *   imports   匯入紀錄（解析結果快照）       keyPath: id (auto)
  *   tables    對照表覆寫（對照表編輯頁）      keyPath: name
  *   settings  雜項設定（作用中案場等）        keyPath: key
+ *   fillcache 填表核對：原始資料辨識結果快取（依檔案 SHA-256）keyPath: key
+ *             （可重算的快取，不納入 JSON 備份）
  * ========================================================================= */
 (function () {
   "use strict";
   window.YangCore = window.YangCore || {};
 
-  var DB_NAME = "yang-analyze-web", DB_VER = 1, STORES = ["projects", "stations", "imports", "tables", "settings"];
+  var DB_NAME = "yang-analyze-web", DB_VER = 2, STORES = ["projects", "stations", "imports", "tables", "settings"];
+  var CACHE_STORES = ["fillcache"];   // 快取類：不備份、清除全部資料時一併清空
   var dbPromise = null;
 
   function open() {
@@ -26,6 +29,7 @@
         if (!db.objectStoreNames.contains("imports")) db.createObjectStore("imports", { keyPath: "id", autoIncrement: true });
         if (!db.objectStoreNames.contains("tables")) db.createObjectStore("tables", { keyPath: "name" });
         if (!db.objectStoreNames.contains("settings")) db.createObjectStore("settings", { keyPath: "key" });
+        if (!db.objectStoreNames.contains("fillcache")) db.createObjectStore("fillcache", { keyPath: "key" });
       };
       req.onsuccess = function () { resolve(req.result); };
       req.onerror = function () { reject(req.error); };
@@ -88,7 +92,14 @@
       return chain;
     },
     clearAll: function () {
-      return Promise.all(STORES.map(function (s) { return storage.clearStore(s); }));
+      return Promise.all(STORES.concat(CACHE_STORES).map(function (s) { return storage.clearStore(s); }));
+    },
+
+    /* ---------- 填表核對辨識快取（失敗一律不影響主流程） ---------- */
+    fillCache: {
+      get: function (key) { return storage.get("fillcache", key).catch(function () { return null; }); },
+      put: function (obj) { return storage.put("fillcache", obj).catch(function () { return null; }); },
+      clear: function () { return storage.clearStore("fillcache"); }
     }
   };
 

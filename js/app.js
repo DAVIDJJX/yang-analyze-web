@@ -80,6 +80,7 @@
         bindNav(); bindUpload(); bindActions();
         renderProjectSelect(); renderStationsView(); renderProjectsView();
         renderTablesView(); renderHistoryView(); updateStatusBar();
+        restoreView();
       })
       .catch(function (e) { toast("初始化失敗：" + e.message, true); });
   }
@@ -156,9 +157,17 @@
         if (btn.dataset.view === "projects") renderProjectsView();
         if (btn.dataset.view === "tables") renderTablesView();
         if (btn.dataset.view === "rules") renderRulesView();
+        if (btn.dataset.view === "fill" && window.YangFill && window.YangFill.ui) window.YangFill.ui.onShow();
         $("#action-bar").classList.toggle("hidden", btn.dataset.view !== "convert");
+        try { localStorage.setItem("yang.lastView", btn.dataset.view); } catch (e) { /* 私密模式等，忽略 */ }
       });
     });
+  }
+  /* 網址 #fill 或上次開啟的頁面 → 啟動時直接切換 */
+  function restoreView() {
+    var want = (location.hash || "").replace(/^#/, "");
+    if (!want) { try { want = localStorage.getItem("yang.lastView") || ""; } catch (e) { want = ""; } }
+    if (want && want !== "convert" && document.getElementById("view-" + want)) showView(want);
   }
   function showView(name) {
     $$(".nav-btn").forEach(function (b) {

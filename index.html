@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yang-analyze web — 環境監測數據分析</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="stylesheet" href="css/main.css?v=6">
+<link rel="stylesheet" href="css/main.css?v=7">
 </head>
 <body>
 <div id="app">
@@ -28,6 +28,7 @@
 
     <nav>
       <button class="nav-btn active" data-view="convert">資料轉換</button>
+      <button class="nav-btn" data-view="fill">填表核對 <span class="nav-new">新</span></button>
       <button class="nav-btn" data-view="history">匯入紀錄</button>
       <button class="nav-btn" data-view="stations">測站管理</button>
       <button class="nav-btn" data-view="projects">案場管理</button>
@@ -35,7 +36,7 @@
       <button class="nav-btn" data-view="rules">規範查閱</button>
       <button class="nav-btn" data-view="backup">設定/備份</button>
     </nav>
-    <div class="side-foot">水質＋空氣＋噪音模組<br>純靜態網頁，資料只存在你的瀏覽器</div>
+    <div class="side-foot">水質＋空氣＋噪音模組・填表核對<br>純靜態網頁，資料只存在你的瀏覽器</div>
   </aside>
 
   <!-- ================= 工作區 ================= -->
@@ -81,6 +82,65 @@
         </div>
         <button class="btn danger" id="btn-clear">清除</button>
         <button class="btn primary" id="btn-export" disabled>匯出 Excel</button>
+      </div>
+    </section>
+
+    <!-- ---- 填表核對 ---- -->
+    <section id="view-fill" class="view hidden">
+      <header class="view-head">
+        <h1>填表核對</h1>
+        <p class="desc">上傳原始資料（DocuWorks、PDF、Word、Excel、影像，可多檔混放）與待填表格（Word / Excel 填寫總表），
+          系統會自動辨識報告內的表格，把待填表格的每個空格依「測站＋項目＋統計方式」對照原始資料填滿；
+          核對無誤後，於「核對完成檔案」下載與原檔相同格式的已填寫檔案。
+          掃描檔（DocuWorks / 掃描 PDF / 影像）以 OCR 在你的瀏覽器內辨識，不會上傳任何檔案。</p>
+      </header>
+      <div class="fill-banner" id="fill-ocr-banner" hidden></div>
+
+      <div class="fill-inputs">
+        <div class="panel fill-step">
+          <h3><span class="fill-num">1</span>原始資料</h3>
+          <div class="fill-drop" id="fill-raw-drop" tabindex="0" role="button" aria-label="加入原始資料">
+            <strong>拖曳原始資料到這裡</strong>，或點擊選擇檔案
+            <div class="hint">DocuWorks（.xdw / .xbd）、PDF、Word（.docx）、Excel（.xlsx / .xls / .csv）、影像（.jpg / .png / .tif）</div>
+            <input type="file" id="fill-raw-input" multiple hidden>
+          </div>
+          <div id="fill-raw-list" class="fill-file-list"></div>
+        </div>
+        <div class="panel fill-step">
+          <h3><span class="fill-num">2</span>待填表格</h3>
+          <div class="fill-drop" id="fill-tpl-drop" tabindex="0" role="button" aria-label="加入待填表格">
+            <strong>拖曳待填表格到這裡</strong>，或點擊選擇檔案
+            <div class="hint">Word（.docx，例：填寫總表）、Excel（.xlsx / .xlsm / .xls）；可放多個</div>
+            <input type="file" id="fill-tpl-input" multiple hidden>
+          </div>
+          <div id="fill-tpl-list" class="fill-file-list"></div>
+        </div>
+      </div>
+
+      <div class="panel fill-step" id="fill-review-panel">
+        <h3><span class="fill-num">3</span>核對</h3>
+        <div class="fill-summary" id="fill-summary"></div>
+        <div class="fill-tools" id="fill-review-tools" hidden>
+          <label class="filter-toggle"><input type="checkbox" id="fill-only-issues"> 只顯示需處理的空格</label>
+          <span class="fill-tool-group">
+            無對應資料的空格填入
+            <input id="fill-placeholder" class="fill-ph-input" value="-" aria-label="無資料時的填入文字">
+            <button class="btn small" id="fill-placeholder-btn">套用</button>
+          </span>
+          <button class="btn small danger" id="fill-clear-btn">清除本頁</button>
+        </div>
+        <div class="fill-mapping" id="fill-mapping" hidden></div>
+        <div id="fill-review"></div>
+      </div>
+
+      <div class="panel fill-step" id="fill-out-panel">
+        <h3><span class="fill-num">4</span>核對完成檔案</h3>
+        <div id="fill-outputs"></div>
+        <div class="fill-out-actions">
+          <label class="filter-toggle"><input type="checkbox" id="fill-mark"> 填入處以黃色底色標示（方便複查）</label>
+          <button class="btn" id="fill-report-btn" disabled>下載核對報告（.xlsx）</button>
+          <button class="btn" id="fill-zip-btn" disabled>全部下載（.zip）</button>
+        </div>
       </div>
     </section>
 
@@ -296,6 +356,16 @@
   </div>
 </div>
 
+<!-- 填表核對：原始資料辨識結果檢視 -->
+<div id="fill-inspect-modal" class="modal-overlay hidden">
+  <div class="modal fill-inspect">
+    <h3>辨識結果：<span id="fill-inspect-title"></span></h3>
+    <select id="fill-inspect-select" class="fill-inspect-select" aria-label="選擇表格"></select>
+    <div id="fill-inspect-body"></div>
+    <div class="form-actions"><button class="btn" id="fill-inspect-close">關閉</button></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <!-- 函式庫（本地載入，無 CDN 依賴） -->
@@ -318,5 +388,23 @@
 <script src="js/configs/noise.js?v=6"></script>
 <!-- 介面 -->
 <script src="js/app.js?v=6"></script>
+<!-- 填表核對（OCR／PDF 函式庫本地載入；掃描檔辨識需以 http(s) 開啟） -->
+<script src="lib/pdfjs/pdf.min.js?v=7"></script>
+<script src="lib/tesseract/tesseract.min.js?v=7"></script>
+<script src="js/fill/dict.js?v=7"></script>
+<script src="js/fill/filetype.js?v=7"></script>
+<script src="js/fill/zip.js?v=7"></script>
+<script src="js/fill/ccitt.js?v=7"></script>
+<script src="js/fill/xdw.js?v=7"></script>
+<script src="js/fill/raster.js?v=7"></script>
+<script src="js/fill/grid.js?v=7"></script>
+<script src="js/fill/ocr.js?v=7"></script>
+<script src="js/fill/pdfread.js?v=7"></script>
+<script src="js/fill/docx.js?v=7"></script>
+<script src="js/fill/xlsxtpl.js?v=7"></script>
+<script src="js/fill/extract.js?v=7"></script>
+<script src="js/fill/match.js?v=7"></script>
+<script src="js/fill/rawdoc.js?v=7"></script>
+<script src="js/fill/fill_ui.js?v=7"></script>
 </body>
 </html>
