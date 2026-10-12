@@ -42,8 +42,9 @@
   var RE_META_KEYS = /計畫名稱|現場[編綸給]號|監測位置|檢測位置|監測日期|檢測日期|委託單位|執行單位|報告編號/g;
   var NOTE_LEN = 48;
   var RE_POINT_LABEL = /^(測點|點位|採樣點|監測點|測站|點)\s*(No\.?|#)?\s*([一二三四五六七八九十]|\d{1,2})$|^#\s*\d{1,2}$|^No\.?\s*\d{1,2}$/i;
-  // \u6578\u5b57\u958b\u982d\u3001\u53ea\u5e36 OCR \u5c3e\u7db4\uff08\u300c25./\u300d\u300c\u201c6.41\u300d\u300c0.020\n~ <0.002\u300d\uff09\u7684\u683c\uff1a\u89e3\u6790\u5931\u6557\u6642\u4ecd\u8996\u70ba\u6578\u503c\u5217
-  var RE_NUMISH = /^[\s\u201c"'\u2018\u2027\u00b7.]*[<>]?\s*\d+(\.\d+)?[\s\/.~|\u00a9,\u4e00]*(\n[\s\S]*)?$/;
+  // \u5169\u884c\u6578\u503c\u4f75\u5728\u540c\u4e00\u683c\uff08\u4e0a\u4e0b\u5169\u5217\u5408\u4f75\uff0c\u5982\u300c0.020\n~ <0.002\u300d\uff09\uff1a\u89e3\u6790\u5931\u6557\u6642\u4ecd\u8996\u70ba\u6578\u503c\u5217\u3002
+  // \u53ea\u9650\u5169\u884c\u7686\u70ba\u6578\u5b57\u8005\uff1b\u8868\u982d\u7684\u591a\u884c\u6587\u5b57\uff08\u300c0\n8\u5c0f\u6642\u5e73\u5747\u300d\u300c03\n(ppm )\u300d\uff09\u4e0d\u53ef\u7b26\u5408
+  var RE_NUMISH = /^[\s\u201c"'\u2018]*[<>]?\s*\d+(\.\d+)?\s*\n\s*[~\uff5e]?\s*[<>]?\s*\d+(\.\d+)?\s*$/;
   var RE_CIRCLED = /[\u2460-\u2473\u2474-\u2487\u2488-\u249b\u24f5-\u24fe\u2776-\u2793\u3251-\u325f]/;
   function circledNo(ch) {
     var c = ch.charCodeAt(0);
