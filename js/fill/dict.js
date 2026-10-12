@@ -118,7 +118,7 @@
     it("PM10", "air", "PM10", "懸浮微粒", "ug/m3", ["PM10", "PM 10", "懸浮微粒"], ["PMio", "PMi0", "PMl0", "PM1o", "PMlo", "PMIO", "PM1O", "PM l0", "PM io"], [], { ci: true }),
     it("PM2.5", "air", "PM2.5", "細懸浮微粒", "ug/m3", ["PM2.5", "PM 2.5", "細懸浮微粒"], ["PM25", "PM2,5", "PM2.s", "PM2 5", "PM2,s", "PM 25", "PM2.", "PM2", "PM2,"], [], { ci: true }),
     it("TSP", "air", "TSP", "總懸浮微粒", "ug/m3", ["TSP", "總懸浮微粒"], ["T.S.P", "T.S.P."], [], { ci: true }),
-    it("H2S", "air", "H₂S", "硫化氫", "ppm", ["H2S", "硫化氫"], ["H,S", "HzS", "硫化所", "硫化氮"], [], { ci: true }),
+    it("H2S", "air", "H₂S", "硫化氫", "ppm", ["H2S", "硫化氫"], ["H,S", "HzS", "硫化所", "硫化氮", "硫化氨"], [], { ci: true }),
     it("NH3", "air", "NH₃", "氨", "ppm", ["NH3", "氨氣", "氨"], ["NH,"], [], { ci: true, notAfter: /^\s*(-\s*N|氮|態氮)/i }),
     it("ODOR", "air", "臭氣", "臭氣（異味）", null, ["臭氣", "異味", "異味污染物", "異味污染", "臭氣強度", "臭度", "臭味", "臭氣濃度"], [], []),
     it("Pb", "metal", "Pb", "鉛", null, ["Pb", "鉛"], [], []),
@@ -228,6 +228,9 @@
    */
   function findItems(text, opts) {
     var t = prepItemText(text), hits = [], i = 0, n = t.length;
+    // 「○離子濃度指數」在地下水報告中只有 pH（氫離子濃度指數）。OCR 常把首字讀成 氨/氮/氟/握/膠/氛 等，
+    // 不可讓首字的單字別名（氨→NH3）搶先命中
+    if (/^.{0,2}離子濃度指數/.test(t)) return [{ code: "pH", start: 0, end: n, len: n, exact: false, generic: false, weak: false }];
     while (i < n) {
       var list = ALIAS_INDEX[t.charAt(i).toLowerCase()], found = null;
       if (list) {
@@ -448,8 +451,13 @@
    */
   function parseValue(text) {
     var t0 = norm(text);
-    var res = { ok: false, value: t0, num: null, cmp: "", nd: false, decimals: 0, mark: false };
-    var t = t0.replace(/^[\s_'"`|]+/, "").replace(/[\s_'"`|~\-一]+$/, "");
+    var res = { ok: false, value: t0, num: null, cmp: "", nd: false, decimals: 0, mark: false, noisy: false };
+    var t1 = t0.replace(/^[\s_'"`|]+/, "").replace(/[\s_'"`|~\-一]+$/, "");
+    // OCR 雜訊：前導「‧.」、全形／彎引號，尾端 ©®、「空白+逗號」（「<0.1 ,」）。
+    // 尾端「/」不去除（「25./」的 / 可能是 7，不可猜）。去除了這些雜訊者標為 noisy，由呼叫端降為需核對
+    var t = t0.replace(/^[‧·、]\.?\s+/, "").replace(/^[\s_'"`|“”‘’]+/, "")
+      .replace(/[\s_'"`|~\-一©®]+$/, "").replace(/\s+,$/, "").replace(/[\s_'"`|~\-一©®]+$/, "");
+    var noisy = t !== t1;
     if (!t) return res;
     if (/^(N\.?\s*D\.?|未檢出|低於偵測極限|<\s*MDL|<\s*偵測極限)(\s*[(<].*)?$/i.test(t)) {
       return { ok: true, value: "ND", num: null, cmp: "ND", nd: true, decimals: 0, mark: false };
@@ -502,7 +510,7 @@
     var num = parseFloat(t);
     if (!isFinite(num)) return res;
     var dec = (t.split(".")[1] || "").length;
-    return { ok: true, value: (cmp || "") + t, num: num, cmp: cmp, nd: false, decimals: dec, mark: mark, pct: pct };
+    return { ok: true, value: (cmp || "") + t, num: num, cmp: cmp, nd: false, decimals: dec, mark: mark, pct: pct, noisy: noisy };
   }
   /** 數值後接單位（「0.012 ppm」「25.3 ℃」「30 dB(A)」）→ {pv, unit} | null */
   function parseValueUnit(text) {

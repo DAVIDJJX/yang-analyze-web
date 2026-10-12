@@ -405,4 +405,25 @@ T.test("效能：大量標題文字辨識 < 1.5 秒", () => {
   assert.ok(Date.now() - t0 < 1500, "耗時 " + (Date.now() - t0) + "ms");
 });
 
+T.test("OCR 雜訊：前導引號、尾端 ©、「空白+逗號」可解析並標為 noisy；尾端「/」與多行併格仍拒絕", () => {
+  const cases = [["“44.0", "44.0"], ["“28.4", "28.4"], ["<0.008 ©", "<0.008"], ["<0.1 ,", "<0.1"], ["4.91 ,", "4.91"], ["‧. ND", "ND"]];
+  for (const [s, v] of cases) {
+    const r = D.parseValue(s);
+    assert.ok(r.ok, "應可解析：" + s);
+    assert.strictEqual(r.value, v, s);
+  }
+  assert.strictEqual(D.parseValue("“44.0").noisy, true);
+  assert.strictEqual(D.parseValue("44.0").noisy, false);
+  assert.strictEqual(D.parseValue("<0.040 |").noisy, false);
+  ["25./", "0.020\n~ <0.002", "— AOA"].forEach((s) => assert.ok(!D.parseValue(s).ok, "不應解析：" + s));
+});
+
+T.test("pH：「○離子濃度指數」一律判為 pH（含 OCR 首字變體）；單獨「氨」仍為 NH3；「硫化氨」為 H2S", () => {
+  ["氫離子濃度指數", "氨離子濃度指數", "氟離子濃度指數", "氮離子濃度指數", "膠離子濃度指數", "氛離子濃度指數"].forEach((s) => {
+    assert.deepStrictEqual(D.findItems(s).map((h) => h.code), ["pH"], s);
+  });
+  assert.deepStrictEqual(D.findItems("氨").map((h) => h.code), ["NH3"]);
+  assert.deepStrictEqual(D.findItems("硫化氨").map((h) => h.code), ["H2S"]);
+});
+
 T.done("dict.test.js");

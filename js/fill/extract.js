@@ -42,6 +42,8 @@
   var RE_META_KEYS = /計畫名稱|現場[編綸給]號|監測位置|檢測位置|監測日期|檢測日期|委託單位|執行單位|報告編號/g;
   var NOTE_LEN = 48;
   var RE_POINT_LABEL = /^(測點|點位|採樣點|監測點|測站|點)\s*(No\.?|#)?\s*([一二三四五六七八九十]|\d{1,2})$|^#\s*\d{1,2}$|^No\.?\s*\d{1,2}$/i;
+  // \u6578\u5b57\u958b\u982d\u3001\u53ea\u5e36 OCR \u5c3e\u7db4\uff08\u300c25./\u300d\u300c\u201c6.41\u300d\u300c0.020\n~ <0.002\u300d\uff09\u7684\u683c\uff1a\u89e3\u6790\u5931\u6557\u6642\u4ecd\u8996\u70ba\u6578\u503c\u5217
+  var RE_NUMISH = /^[\s\u201c"'\u2018\u2027\u00b7.]*[<>]?\s*\d+(\.\d+)?[\s\/.~|\u00a9,\u4e00]*(\n[\s\S]*)?$/;
   var RE_CIRCLED = /[\u2460-\u2473\u2474-\u2487\u2488-\u249b\u24f5-\u24fe\u2776-\u2793\u3251-\u325f]/;
   function circledNo(ch) {
     var c = ch.charCodeAt(0);
@@ -180,7 +182,9 @@
     T.dataRow = new Array(nR);
     for (r = 0; r < nR; r++) T.dataRow[r] = false;
     T.cells.forEach(function (X) {
-      var data = X.kind === "value" || (T.role === "template" && X.kind === "blank" && interiorBlank(T, X));
+      // raw 表：數字開頭、解析失敗的格也算資料列；否則該列的表頭搜尋會提早中斷，MDL 欄的數字會被誤當成數值
+      var numish = T.role !== "template" && X.kind === "label" && RE_NUMISH.test(X.text || "");
+      var data = X.kind === "value" || numish || (T.role === "template" && X.kind === "blank" && interiorBlank(T, X));
       X.dataCell = data;
       if (!data) return;
       for (var rr = X.r0; rr <= X.r1; rr++) T.dataRow[rr] = true;
@@ -317,6 +321,8 @@
       for (var i = 0; i < list.length; i++) {
         var L = list[i];
         if (L.X.kind !== "label") continue;
+        // 單位欄的內容（如「一 mn」＝m）不是項目名稱，否則 mn 會被誤配為錳
+        if (L.axis === "row" && T.unitCols && T.unitCols.indexOf(L.X.c0) >= 0) continue;
         var f = feat(L.X), h = f.items;
         if (h.length && !(secondary && f.stat)) return { code: h[0].code, generic: h[0].generic, L: L };
       }
@@ -752,6 +758,11 @@
       if (stat === "hourly") return;
       if (stat === "value" && T.timeSpan && X.r0 >= T.timeSpan[0] && X.r1 <= T.timeSpan[1]) return;
       var unit = unitFrom(T, X, ih, all.slice().sort(function (a, b) { return a.dist - b.dist; }));
+      // 數值：去除 OCR 雜訊（前導引號、尾端 © 等）或 pH 漏掉小數點（「67」→「6.7」）者一律標為需核對
+      var pv = X.pv, pvGuess = !!X.pvGuess || !!pv.noisy;
+      if (ih.code === "pH" && pv.num !== null && pv.num > 14 && /^\d{2}$/.test(pv.value)) {
+        pv = dict.parseValue(pv.value.charAt(0) + "." + pv.value.charAt(1)); pvGuess = true;
+      }
       // 測站：標題儲存格（鍵值或與已知測站相符者，近者優先）
       var st = null;
       var lab = all.slice().sort(function (a, b) { return a.dist - b.dist; });
@@ -777,9 +788,9 @@
         sheet: table.sheet || null, r: X.r0, c: X.c0, r1: X.r1, c1: X.c1, cellText: X.text,
         item: ih.code, stat: stat, unit: unit,
         station: null, stationRaw: st ? st.raw : null, stationKey: null, stationVia: st ? st.via : null, pointNo: null,
-        value: X.pv.value, num: X.pv.num, cmp: X.pv.cmp, nd: !!X.pv.nd, decimals: X.pv.decimals,
+        value: pv.value, num: pv.num, cmp: pv.cmp, nd: !!pv.nd, decimals: pv.decimals,
         date: T.date ? dict.formatDate(T.date) : null,
-        conf: X.pvGuess ? Math.min(typeof X.cell.conf === "number" ? X.cell.conf : 50, 50) : (X.cell.conf === undefined ? null : X.cell.conf),
+        conf: pvGuess ? Math.min(typeof X.cell.conf === "number" ? X.cell.conf : 50, 50) : (X.cell.conf === undefined ? null : X.cell.conf),
         bbox: X.cell.bbox || null,
         source: st ? st.source : "point", where: whereOf(table, X), labels: labelSummary(rl, cl),
         ref: X.cell.ref || null
