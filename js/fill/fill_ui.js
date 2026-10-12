@@ -1402,12 +1402,88 @@
     }
     inspectOpener = null;
   }
+  // 檢視方式：table＝表格（格線與數值標示）；text＝可選取、可複製的文字（原始資料內容或 OCR 結果）
+  var inspectMode = "table";
+  function inspectModeBar() {
+    var bar = el("div", "fill-inspect-modes");
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "檢視方式");
+    [["table", "表格"], ["text", "文字（可選取、複製）"]].forEach(function (m) {
+      var b = el("button", "btn small", m[1]);
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(inspectMode === m[0]));
+      b.addEventListener("click", function () { setInspectMode(m[0]); });
+      bar.appendChild(b);
+    });
+    return bar;
+  }
+  function setInspectMode(mode) {
+    inspectMode = mode;
+    renderInspectTable();
+    var btns = $("#fill-inspect-body").querySelectorAll(".fill-inspect-modes button");
+    var k = mode === "text" ? 1 : 0;
+    if (btns[k]) btns[k].focus();
+  }
+  function renderInspectText(box, t) {
+    var doc = inspectEntry.doc;
+    box.appendChild(el("div", "fill-note", "文字取自檔案內容或 OCR 辨識，可能與原檔有出入；請以原始影像核對。"));
+    if (t.context && t.context.length) {
+      box.appendChild(el("div", "fill-inspect-ctx", "頁面文字："));
+      box.appendChild(inspectTextBox(t.context.join("\n"), true, "頁面文字"));
+    }
+    box.appendChild(el("div", "fill-inspect-ctx", "表格內容（欄位以 Tab 分隔，可直接貼到 Excel）："));
+    box.appendChild(inspectTextBox(YF.raw.tableText(t), false, "表格文字"));
+    var bar = el("div", "fill-inspect-copybar");
+    var msg = el("span", "fill-note");
+    msg.setAttribute("role", "status");
+    bar.appendChild(inspectCopyButton("複製此表", function () { return YF.raw.tableText(t); }, msg));
+    bar.appendChild(inspectCopyButton("複製整份文字", function () { return YF.raw.docText(doc); }, msg));
+    bar.appendChild(msg);
+    box.appendChild(bar);
+  }
+  function inspectTextBox(text, wrap, label) {
+    var ta = el("textarea", "fill-inspect-text");
+    ta.readOnly = true;
+    ta.spellcheck = false;
+    ta.wrap = wrap ? "soft" : "off";
+    ta.value = text;
+    ta.rows = Math.min(14, Math.max(3, text.split("\n").length));
+    ta.setAttribute("aria-label", label);
+    return ta;
+  }
+  function inspectCopyButton(label, getText, msg) {
+    var b = el("button", "btn small", label);
+    b.type = "button";
+    b.addEventListener("click", function () {
+      copyText(getText()).then(function () { msg.textContent = "已複製到剪貼簿"; },
+        function () { msg.textContent = "瀏覽器不允許自動複製，請在文字框內選取後按 Ctrl+C"; });
+    });
+    return b;
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var ta = el("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      ta.remove();
+      if (ok) resolve(); else reject(new Error("無法複製"));
+    });
+  }
   function renderInspectTable() {
     var box = $("#fill-inspect-body");
     box.innerHTML = "";
     if (!inspectEntry) return;
     var t = inspectEntry.doc.tables[Number($("#fill-inspect-select").value) || 0];
     if (!t) return;
+    box.appendChild(inspectModeBar());
+    if (inspectMode === "text") { renderInspectText(box, t); return; }
     var used = {};
     S.facts.forEach(function (f) { if (f.docId === inspectEntry.doc.id && f.tableId === t.id) used[f.r + "," + f.c] = f; });
     var grid = [];

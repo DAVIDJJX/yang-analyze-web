@@ -1103,9 +1103,35 @@
 
   YF.tpl = { fill: fillTemplate, filledName: filledName, MIME: MIME };
 
+  /** 表格的純文字：每列一行、欄位以 Tab 分隔（可直接貼到 Excel）；合併儲存格的文字只放左上角，其餘留空 */
+  function tableText(t) {
+    var nR = t.nRows | 0, nC = t.nCols | 0;
+    var grid = [];
+    for (var r = 0; r < nR; r++) grid.push(new Array(nC).fill(""));
+    (t.cells || []).forEach(function (c) {
+      if (c.r0 < nR && c.c0 < nC) grid[c.r0][c.c0] = String(c.text == null ? "" : c.text).replace(/[\t\r\n]+/g, " ");
+    });
+    return grid.map(function (row) { return row.join("\t"); }).join("\n");
+  }
+
+  /** 整份原始資料的純文字：每個表格前列出標題（頁／工作表／序號）；同一頁的頁面文字只列一次 */
+  function docText(doc) {
+    var parts = [], seenCtx = {};
+    (doc.tables || []).forEach(function (t, i) {
+      var where = (t.page ? "第 " + t.page + " 頁 " : "") + (t.sheet ? "工作表「" + t.sheet + "」 " : "") + "表格 " + (i + 1);
+      parts.push("【" + where + "】");
+      var key = (t.page || "") + "|" + (t.sheet || "");
+      if (t.context && t.context.length && !seenCtx[key]) { seenCtx[key] = true; parts.push(t.context.join("\n")); }
+      parts.push(tableText(t));
+    });
+    return parts.join("\n");
+  }
+
   YF.raw = {
     PIPELINE_VERSION: PIPELINE_VERSION,
     process: processFile,
+    tableText: tableText,
+    docText: docText,
     rowStripDataURL: rowStripDataURL,
     cellPBM: cellPBM,
     pageThumbDataURL: pageThumbDataURL,

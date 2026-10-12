@@ -70,10 +70,17 @@
     return e;
   }
 
+  // 錯誤原因：Worker 主程式載入失敗時，瀏覽器只送出沒有 message 的一般 error 事件，不可直接轉成字串（會變成 "undefined"）
+  function reasonOf(e) {
+    if (e && e.message) return String(e.message);
+    if (typeof e === "string" && e) return e;
+    if (e && typeof e === "object" && e.type) return "瀏覽器回報「" + e.type + "」事件，未提供原因";
+    return "瀏覽器未提供原因";
+  }
+
   function toError(e, prefix) {
     if (e && e.name === "AbortError") return e;
-    var msg = (e && e.message) ? e.message : String(e);
-    var err = new Error((prefix || "") + msg);
+    var err = new Error((prefix || "") + reasonOf(e));
     if (e && e.code) err.code = e.code;
     return err;
   }
@@ -160,7 +167,10 @@
         if (settled) return;
         settled = true; clearTimeout(timer);
         if (w) { try { w.terminate(); } catch (x) { /* 忽略 */ } }
-        reject(toError(e, "OCR 初始化失敗："));
+        var err = toError(e, "OCR 初始化失敗：");
+        // 瀏覽器沒有提供原因時，附上工作程式位置，方便使用者以瀏覽器直接開啟檢查
+        if (!(e && (e.message || typeof e === "string"))) err.message += "（請確認 " + o.workerPath + " 可以開啟）";
+        reject(err);
       }
       var timer = setTimeout(function () { fail(new Error("逾時（" + Math.round(o.initTimeout / 1000) + " 秒）")); }, o.initTimeout);
       var opt = {
@@ -225,6 +235,18 @@
     }
   }
 
+  // 先以 fetch 確認工作程式可以讀取：Worker 載入失敗時瀏覽器不提供原因，這裡改取得 HTTP 狀態與位置
+  function checkWorkerScript(o) {
+    if (!root.fetch) return Promise.resolve();
+    return Promise.resolve().then(function () {
+      return root.fetch(o.workerPath, { cache: "no-store" });
+    }).then(function (r) {
+      if (!r.ok) throw new Error("OCR 工作程式無法讀取（HTTP " + r.status + "）：" + o.workerPath);
+    }, function (e) {
+      throw new Error("OCR 工作程式無法讀取（" + reasonOf(e) + "）：" + o.workerPath);
+    });
+  }
+
   /**
    * 初始化 OCR 工作池（重複呼叫回傳同一個 Promise；terminate() 後可重新 init）。
    * opts: {workers 1..4, onProgress({progress,status,workers}), base, langs, dpi(預設 200，0=不設),
@@ -245,13 +267,15 @@
     for (var i = 0; i < o.workers; i++) slots.push(makeSlot("main", i));
     var report = function () { reportInit(o, slots); };
     var t0 = now();
-    S.initP = Promise.all(slots.map(function (s) {
-      return spawn(s, o, o.langs, null, mainParams(o), report).then(function (w) {
-        if (gen !== S.gen) { try { w.terminate(); } catch (x) { /* 忽略 */ } return null; }
-        attach(s, w);
-        return s;
-      }, function (e) { return { error: e }; });
-    })).then(function (res) {
+    S.initP = (injectedT ? Promise.resolve() : checkWorkerScript(o)).then(function () {
+      return Promise.all(slots.map(function (s) {
+        return spawn(s, o, o.langs, null, mainParams(o), report).then(function (w) {
+          if (gen !== S.gen) { try { w.terminate(); } catch (x) { /* 忽略 */ } return null; }
+          attach(s, w);
+          return s;
+        }, function (e) { return { error: e }; });
+      }));
+    }).then(function (res) {
       if (gen !== S.gen) throw abortError("OCR 已關閉");
       var ok = res.filter(function (r) { return r && !r.error; });
       if (!ok.length) {
@@ -271,12 +295,21 @@
       // 初始化失敗：排隊中的工作一併失敗，並允許下次重新 init
       if (gen !== S.gen) return;
       S.initP = null;
+      S.lastError = reasonOf(e);
+      S.failP = Promise.reject(e); S.failP.catch(function () { /* 由各工作處理 */ });
+      S.failAt = now();
       rejectAll(S.q, e); rejectAll(S.nq, e);
     });
     return S.initP;
   }
 
-  function ensureInit() { return S.initP || init(); }
+  // 初始化失敗後的短時間內不重複啟動（否則批次中每一格都會重新建立 worker）；手動呼叫 init() 不受限制
+  var INIT_BACKOFF_MS = 3000;
+  function ensureInit() {
+    if (S.initP) return S.initP;
+    if (S.failP && now() - S.failAt < INIT_BACKOFF_MS) return S.failP;
+    return init();
+  }
 
   function ensureNumeric() {
     if (S.num || S.numP || S.numFailed) return S.numP || Promise.resolve(S.num);

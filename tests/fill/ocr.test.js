@@ -51,6 +51,10 @@ function makeFake(opts) {
       };
       const fail = opts.initFail && opts.initFail(rec);
       if (fail) {
+        if (fail === "generic") {   // Worker 主程式載入失敗：瀏覽器只送出沒有 message 的 error 事件
+          setTimeout(() => o.errorHandler(undefined), 3);
+          return new Promise(() => {});
+        }
         if (fail === "handler") {   // tesseract.js 實際行為：errorHandler 被呼叫、Promise 永不 resolve
           setTimeout(() => o.errorHandler("Error: Network error while fetching chi_tra.traineddata.gz"), 3);
           return new Promise(() => {});
@@ -275,6 +279,17 @@ process.on("exit", (code) => {
   F = makeFake();
   OCR._setTesseract(F.T);
   ok((await OCR.init({ workers: 1 })).ready, "失敗後可重新 init");
+  await OCR.terminate();
+
+  // Worker 載入失敗、瀏覽器沒有提供原因：訊息不可為 "undefined"，且要指出工作程式位置
+  F = makeFake({ initFail: () => "generic" });
+  OCR._setTesseract(F.T);
+  const eg = await expectReject(OCR.init({ workers: 1 }), /OCR 初始化失敗：瀏覽器未提供原因（請確認 .*worker\.min\.js 可以開啟）/); checks++;
+  ok(!/undefined/.test(eg.message), "無原因錯誤不可顯示 undefined（" + eg.message + "）");
+  ok(/worker\.min\.js/.test(OCR.info().lastError || ""), "lastError 記錄初始化失敗原因");
+  const burst = await Promise.all([1, 2, 3].map(() => OCR.recognize(enc("TXT:x")).then(() => "ok", (e) => e.message)));
+  ok(burst.every((m) => /worker\.min\.js/.test(m)) && F.log.created.length === 1,
+    "初始化失敗後短時間內的工作直接失敗、不重建 worker（建立 " + F.log.created.length + " 次）");
   await OCR.terminate();
 
   // errorHandler 路徑（tesseract.js 下載語言檔失敗時 createWorker 永不 resolve）

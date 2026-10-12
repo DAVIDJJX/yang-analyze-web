@@ -429,6 +429,10 @@ table.fill-review-table { border-collapse: collapse; width: 100%; font-size: .82
 .fill-sticky-txt { margin-right: auto; font-size: .86rem; color: var(--c-text); }
 .fill-inspect-select { font: inherit; font-size: .86rem; padding: 5px 8px; border: 1px solid var(--c-border); border-radius: 5px; max-width: 100%; margin-bottom: 10px; }
 .fill-inspect-ctx { font-size: .78rem; color: var(--c-sub); margin-bottom: 6px; word-break: break-all; }
+.fill-inspect-modes { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.fill-inspect-modes .btn[aria-pressed="true"] { border-color: var(--c-accent); color: var(--c-accent); font-weight: 700; }
+.fill-inspect-copybar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+textarea.fill-inspect-text { display: block; width: 100%; box-sizing: border-box; font: .8rem/1.5 ui-monospace, Consolas, "Microsoft JhengHei", monospace; padding: 8px; border: 1px solid var(--c-border); border-radius: 5px; background: var(--c-panel); color: var(--c-text); resize: vertical; margin-bottom: 10px; }
 .fill-inspect-scroll { overflow: auto; max-height: 46vh; border: 1px solid var(--c-border); border-radius: 6px; }
 table.fill-inspect-table { border-collapse: collapse; font-size: .76rem; }
 .fill-inspect-table td { border: 1px solid #c9d3e0; padding: 3px 6px; white-space: pre-line; min-width: 30px; }

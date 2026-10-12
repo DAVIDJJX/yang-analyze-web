@@ -54,4 +54,25 @@ T.test("原始 Word：頁首的監測位置、同段前一表格的監測位置�
   assert.ok(h.context.some((l) => /南港社區活動中心/.test(l)), JSON.stringify(h.context));
 });
 
+T.test("可選取文字：表格以 Tab 分隔、合併格只留左上角、整份文字同頁脈絡只列一次", () => {
+  const t = { nRows: 2, nCols: 3, cells: [
+    { r0: 0, r1: 0, c0: 0, c1: 1, text: "項目\n名稱" },
+    { r0: 0, r1: 0, c0: 2, c1: 2, text: "單位" },
+    { r0: 1, r1: 1, c0: 0, c1: 0, text: "SO2" },
+    { r0: 1, r1: 1, c0: 1, c1: 1, text: "0.003" },
+    { r0: 1, r1: 1, c0: 2, c1: 2, text: "ppm" }
+  ] };
+  assert.strictEqual(R.tableText(t), "項目 名稱\t\t單位\nSO2\t0.003\tppm");
+  const doc = { tables: [
+    { page: 3, index: 0, context: ["監測位置：甲", "表1"], nRows: 1, nCols: 1, cells: [{ r0: 0, r1: 0, c0: 0, c1: 0, text: "A" }] },
+    { page: 3, index: 1, context: ["監測位置：甲", "表1"], nRows: 1, nCols: 1, cells: [{ r0: 0, r1: 0, c0: 0, c1: 0, text: "B" }] },
+    { sheet: "表2", index: 0, context: [], nRows: 1, nCols: 2, cells: [{ r0: 0, r1: 0, c0: 1, c1: 1, text: "C" }] }
+  ] };
+  const s = R.docText(doc);
+  assert.strictEqual(s.split("監測位置：甲").length - 1, 1, s);
+  assert.ok(s.indexOf("【第 3 頁 表格 1】") >= 0 && s.indexOf("【第 3 頁 表格 2】") >= 0, s);
+  assert.ok(s.indexOf("【工作表「表2」 表格 3】") >= 0 && s.indexOf("\tC") >= 0, s);
+  assert.strictEqual(R.tableText({ nRows: 0, nCols: 0, cells: [] }), "");
+});
+
 T.done("rawdoc.test.js");
