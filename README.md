@@ -15,7 +15,7 @@
 匯入你在其他電腦匯出的 JSON 備份檔。
 
 ### 本機
-- 雙擊 `serve.bat`（自動開 `http://localhost:8788/`），或
+- 雙擊 `serve.bat`（自動開 `http://localhost:8788/`；只用 Windows 內建的 PowerShell，**不需安裝 Python**），或
 - 直接用 Chrome / Edge 雙擊開啟 `index.html`
 
 ### 操作流程
@@ -55,7 +55,8 @@
 
 ```
 index.html            主程式入口
-serve.bat             本機啟動器（Windows）
+serve.bat             本機啟動器（Windows，雙擊即可）
+serve.ps1             啟動器使用的本機靜態伺服器（PowerShell，不需 Python）
 .nojekyll             GitHub Pages 設定（停用 Jekyll 處理）
 css/main.css          全部樣式（邏輯與外觀嚴格分離）
 lib/xlsx.full.min.js  SheetJS 0.20.3（本地載入、離線可用；讀值取公式快取結果）

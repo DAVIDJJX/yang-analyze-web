@@ -95,7 +95,7 @@ Word / Excel 原始資料直接讀表格；Excel 若是本站既有「水質／�
 
 ## 6. 已知限制
 
-* 掃描檔需以 `https://`（GitHub Pages）或 `serve.bat`（`http://localhost`）開啟；
+* 掃描檔需以 `https://`（GitHub Pages）或雙擊 `serve.bat`（`http://localhost:8788`，不需安裝 Python）開啟；
   直接雙擊 `index.html`（`file://`）時瀏覽器禁止 OCR 背景執行緒，畫面會提示。
 * OCR 對清晰的印刷表格準確度高；手寫、嚴重歪斜或解析度很低的掃描可能辨識錯誤——
   請以「原始影像」條帶核對，必要時直接修改填入值。
