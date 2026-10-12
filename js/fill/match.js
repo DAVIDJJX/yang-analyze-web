@@ -163,6 +163,16 @@
       if (s >= b.sim - 0.05 || (b.name && sim(slot.station, b.name) >= 0.9)) return { sim: s, via: "name" };
       return null;
     }
+    // 測站 → 有數據的文件（docId 集合）：由數值解析到的範本測站決定
+    var docsByStation = Object.create(null);
+    facts.forEach(function (f) {
+      if (!f.station) return;
+      var b = bestFor(f);
+      if (!b.name || b.sim < rules.minStationSim) return;
+      var k = dict.normStation(b.name);
+      (docsByStation[k] || (docsByStation[k] = Object.create(null)))[f.docId] = 1;
+    });
+    function docsOfStation(name) { return docsByStation[dict.normStation(name)] || Object.create(null); }
     // 索引：項目 → { all, byStation: {範本測站: [facts]}, unmapped: [無測站或對不到任何範本測站者] }
     var eligCache = Object.create(null), aliasElig = Object.create(null), index = Object.create(null);
     function eligibleStations(f) {
@@ -275,6 +285,11 @@
         items.forEach(function (code) {
           if (index[code]) unmapped = unmapped.concat(index[code].unmapped.filter(function (f) { return !!statRankOf(slot, f); }));
         });
+        // 同一份報告中已有此測站數據者，其餘無測站的數值不屬於它（例：地下水某站缺 pH 不應建議其他樣品的 pH）
+        if (slot.station) {
+          var ownDocs = docsOfStation(slot.station);
+          unmapped = unmapped.filter(function (f) { return !ownDocs[f.docId]; });
+        }
         otherStation = 0;
         items.forEach(function (code) {
           if (index[code]) otherStation += index[code].all.filter(function (f) { return !!statRankOf(slot, f); }).length;
@@ -438,6 +453,10 @@
           if (v >= 0.3 && (!best || v > best.sim)) best = { name: s, sim: v };
         });
         g.suggest = best ? best.name : null;
+      } else if (f0.sampleId) {
+        // 同一樣品編號的數值共用一個對應（地下水報告：報告頁首有編號、無樣品名稱）
+        g.label = "樣品編號 " + f0.sampleId + "（" + g.docName + "）";
+        g.suggest = null;
       } else {
         g.label = (g.docName ? g.docName + " " : "") + dict.itemLabel(f0.item) + " 第" + (f0.pointNo || "?") + "測點";
         g.suggest = null;

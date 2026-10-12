@@ -29,6 +29,9 @@
   var RE_KV_STATION = /^(檢測|監測|採樣|量測)(位置|地點|點位|站名|站)$|^(測站|測點|監測點|採樣點|監測站)(名稱)?$|^站名$/;
   var RE_KV_ID = /^(現場|樣品|採樣)?[編綸給]號$|^(現場|樣品)(編號|代號)$/;
   var RE_KV_DATE = /^(檢測|監測|採樣|量測)(日期|時間)|^日期/;
+  /* 採樣時間（地下水報告：每個樣品的採樣時段互不相同，可作為樣品識別）：「採樣時間：115.09.14 11:48~ 12:02」 */
+  var RE_SAMPLE_TIME_LINE = /採[樣棕迪]時間[\s.:：]{0,3}(?:\d{2,4}\s*[.\/]\s*\d{1,2}\s*[.\/]\s*\d{1,2}\s*)?(\d{1,2})\s*[:：;]\s*(\d{2})\s*[~～〜\-]+\s*(\d{1,2})\s*[:：;]\s*(\d{2})/;
+  var RE_SAMPLE_ID_LINE = /樣[品品]編[號号][\s.:]{0,3}([A-Za-z0-9][A-Za-z0-9\-_.]{5,})/;
   var RE_ID_CAPTURE = /(現場|樣品)\s*[編綸給]\s*號\s*[:]?\s*([A-Za-z0-9][A-Za-z0-9\-_.]{3,})/;
   var RE_DATE_KEY = /(監測|檢測|採樣|量測)\s*(日期|時間)/;
   var RE_PERIOD = /\d{2,4}\s*年.*季|\d{2,4}\s*[Qq][1-4]|\d{2,4}\s*年\s*\d{1,2}\s*月|\d{2,3}\.\d{1,2}\s*[~\-至]\s*\d{2,3}\.\d{1,2}/;
@@ -498,6 +501,21 @@
     }
     var nc = Object.keys(colItems).length, nr = Object.keys(rowItems).length;
     T.orient = (nc >= 2 && nc > nr) ? "cols" : (nr >= 2 && nr > nc) ? "rows" : "dist";
+    // 頁首的「樣品編號」（表格外的文字列，如地下水報告每頁抬頭）
+    T.headerIds = [];
+    (T.table.context || []).forEach(function (line) {
+      var sm = RE_SAMPLE_ID_LINE.exec(dict.normLight(typeof line === "string" ? line : (line && line.text) || "").replace(/：/g, ":"));
+      if (sm) T.headerIds.push(sm[1]);
+    });
+    T.headerIds = uniq(T.headerIds.map(function (x) { return canonSampleKey(x); }).filter(Boolean));
+    T.headerStarts = []; T.headerEnds = [];
+    (T.table.context || []).forEach(function (line) {
+      var tm = RE_SAMPLE_TIME_LINE.exec(dict.normLight(typeof line === "string" ? line : (line && line.text) || "").replace(/：/g, ":"));
+      if (!tm) return;
+      T.headerStarts.push(("0" + tm[1]).slice(-2) + ":" + tm[2]);
+      T.headerEnds.push(("0" + tm[3]).slice(-2) + ":" + tm[4]);
+    });
+    T.headerStarts = uniq(T.headerStarts); T.headerEnds = uniq(T.headerEnds);
     T.sampleIds = uniq(T.sampleIds.filter(Boolean));
     T.captures = uniq(T.captures);
     T.dates.sort(function (a, b) { return b.w - a.w; });
@@ -800,17 +818,48 @@
   }
 
   /** 現場編號 → 測站（同一文件內，已知測站的表格學得對照） */
+  /** 樣品編號的標準鍵：報告編號末 4 碼＋「-」＋序號數字（容許前綴的 OCR 誤讀，如 1UJ119U0996-001 → 0996-001） */
+  function canonSampleKey(id) {
+    var n = normId(id), i = n.lastIndexOf("-");
+    if (i < 0) return null;
+    var head = n.slice(0, i).replace(/\D/g, ""), tail = n.slice(i + 1).replace(/\D/g, "");
+    if (head.length < 4 || !tail) return null;
+    return head.slice(-4) + "-" + tail;
+  }
   function applySampleIds(Ts, facts, bestKnown, knownOn) {
+    // (1) 表格儲存格中的現場／樣品編號：容許 1 字 OCR 差異（必須唯一指向同一測站）
+    linkSampleIds(Ts, facts, function (T) { return T.sampleIds; }, function (id) { return id; }, true, bestKnown);
+    // (2) 頁首「樣品編號」（地下水報告）：報告編號末 4 碼＋序號須完全相同，不容許模糊比對
+    linkSampleIds(Ts, facts, function (T) { return T.headerIds || []; }, canonSampleKey, false, bestKnown);
+    // (3) 頁首「採樣時間」：各樣品的起訖時刻互不相同，起或迄任一與唯一的樣品完全相同即連結（OCR 常讀錯單一數字）
+    linkSampleIds(Ts, facts, function (T) { return T.headerStarts || []; }, function (x) { return x; }, false, bestKnown);
+    linkSampleIds(Ts, facts, function (T) { return T.headerEnds || []; }, function (x) { return x; }, false, bestKnown);
+  }
+  /** 依編號把無測站的數值連結到同編號已知測站的表格；keyOf 取比對鍵，fuzzy 是否容許 1 字差異 */
+  function linkSampleIds(Ts, facts, idsOf, keyOf, fuzzy, bestKnown) {
     var map = {}, conflict = {};
+    // 來源：該表已判定測站的數值（不論是否在已知測站清單內，皆換成最相符的已知測站名稱）
+    function canonName(n) {
+      var b = bestKnown ? bestKnown(n) : null;
+      return (b && b.sim >= 0.6) ? b.name : null;   // 無法對應已知測站者不作為來源（避免 OCR 亂碼自我連結）
+    }
     Ts.forEach(function (T) {
-      if (T.sampleIds.length !== 1) return;
-      var names = uniq(facts.filter(function (f) { return f._T === T && f._known; }).map(function (f) { return f.station; }));
+      var ids = idsOf(T);
+      if (ids.length !== 1) return;
+      var names = uniq(facts.filter(function (f) { return f._T === T && f.station; }).map(function (f) { return canonName(f.station); }).filter(Boolean));
       if (names.length !== 1) return;
-      var id = T.sampleIds[0];
-      if (map[id] && map[id] !== names[0]) conflict[id] = 1;
-      map[id] = names[0];
+      var k = keyOf(ids[0]);
+      if (!k) return;
+      if (map[k] && map[k] !== names[0]) conflict[k] = 1;
+      map[k] = names[0];
     });
     Object.keys(conflict).forEach(function (k) { delete map[k]; });
+    // 先記下各表的樣品編號（即使無測站可連結，也要供「樣品:編號」對應鍵使用）
+    Ts.forEach(function (T) {
+      var list0 = idsOf(T);
+      if (list0.length !== 1) return;
+      facts.forEach(function (f) { if (f._T === T && !f.sampleId) f.sampleId = list0[0]; });
+    });
     var ids = Object.keys(map);
     if (!ids.length) return;
     function splitId(id) {
@@ -818,26 +867,30 @@
       return m ? { head: m[1], tail: m[2] } : null;
     }
     function lookup(id) {
-      if (map[id]) return map[id];
-      if (id.length < 6) return null;
+      var k = keyOf(id);
+      if (!k) return null;
+      if (map[k]) return map[k];
+      if (!fuzzy || k.length < 6) return null;
       // 容許 1 字 OCR 差異，但必須唯一指向同一測站；有「-序號」者序號須完全相同
-      var sp = splitId(id), names = {};
-      ids.forEach(function (k) {
-        if (Math.abs(k.length - id.length) > 1) return;
+      var sp = splitId(k), names = {};
+      ids.forEach(function (mk) {
+        if (Math.abs(mk.length - k.length) > 1) return;
         var d;
         if (sp) {
-          var sk = splitId(k);
+          var sk = splitId(mk);
           if (!sk || sk.tail !== sp.tail) return;
           d = D().levenshtein(sk.head, sp.head);
-        } else d = D().levenshtein(k, id);
-        if (d <= 1) names[map[k]] = 1;
+        } else d = D().levenshtein(mk, k);
+        if (d <= 1) names[map[mk]] = 1;
       });
       var list = Object.keys(names);
       return list.length === 1 ? list[0] : null;
     }
     Ts.forEach(function (T) {
-      if (T.sampleIds.length !== 1) return;
-      var name = lookup(T.sampleIds[0]);
+      var list = idsOf(T);
+      if (list.length !== 1) return;
+      facts.forEach(function (f) { if (f._T === T && !f.sampleId) f.sampleId = list[0]; });
+      var name = lookup(list[0]);
       if (!name) return;
       facts.forEach(function (f) {
         if (f._T !== T || f._known) return;
@@ -846,7 +899,7 @@
         // 測站欄位本身在表頭（只是 OCR 失敗）→ 保留版面來源等級
         if (f.source !== "pivot" && f.source !== "row") f.source = "context";
         f.stationVia = "sampleId";
-        f.sampleId = T.sampleIds[0];
+        f.sampleId = list[0];
       });
     });
   }
@@ -862,6 +915,10 @@
         resolveStation(f, bestKnown, knownOn);
       }
     });
+  }
+  /** 地址（縣市鄉鎮＋門牌／路段號）不是測站名稱 */
+  function isAddressish(s) {
+    return /(縣|市)[^\s]{0,6}(鎮|鄉|區|市)|\d+\s*(路|號|段|巷|弄)/.test(String(s));
   }
   /* 同一頁其他表格恰好只出現一個測站 → 本頁無測站的數值（例：測定條件表的風速/溫濕度）歸該測站 */
   function applyPageStations(facts, bestKnown, knownOn) {
@@ -897,6 +954,16 @@
       if (c) caps.push(c);
     });
     caps = uniq(caps);
+    // 地下水報告：「樣品名稱」才是採樣點名稱（「採樣地點」多為地址）→ 優先採用
+    var samples = uniq(lines.map(function (l) { return D().findSampleName(l); }).filter(Boolean));
+    if (samples.length === 1) res = { raw: samples[0] };
+    else if (samples.length > 1 && knownOn) {
+      var sk = uniq(samples.map(function (c) { var b = bestKnown(c); return b ? b.name : null; }).filter(Boolean));
+      if (sk.length === 1) res = { raw: sk[0] };
+    }
+    if (res) { T._ctxStation = res; return res; }
+    // 採樣地點若是地址（無 樣品名稱 時）不作為測站名稱，改由樣品編號對應
+    caps = caps.filter(function (c) { return !isAddressish(c); });
     if (caps.length === 1) res = { raw: caps[0] };
     else if (caps.length > 1 && knownOn) {
       var kn = uniq(caps.map(function (c) { var b = bestKnown(c); return b ? b.name : null; }).filter(Boolean));
@@ -990,15 +1057,16 @@
     var out = [];
     Ts.forEach(function (T) { extractTableFacts(T, doc, bestKnown, knownOn, out); });
     out.forEach(function (f) { resolveStation(f, bestKnown, knownOn); });
+    applyContextStations(out, bestKnown, knownOn);     // 先取頁首測站，樣品編號連結才能看到各表的測站
     applySampleIds(Ts, out, bestKnown, knownOn);
-    applyContextStations(out, bestKnown, knownOn);
     applyPageStations(out, bestKnown, knownOn);
     out = dedupeRows(out);
     assignPoints(out);
     var seen = {};
     out.forEach(function (f) {
       if (!f.station) { f.source = "point"; f.stationVia = null; }
-      f.stationKey = stationKeyOf(f);
+      f.stationKey = (!f.station && f.sampleId && canonSampleKey(f.sampleId))
+        ? "樣品:" + canonSampleKey(f.sampleId) : stationKeyOf(f);
       var id = f.docId + "|" + f.tableId + "|" + f.r + "," + f.c;
       while (seen[id]) id += "'";
       seen[id] = 1;
@@ -1014,6 +1082,10 @@
   function stationFromText(text, known, bestKnown) {
     var t = D().norm(text);
     if (!t) return null;
+    // 同一段落含備註與多個表名時，只取最後一個「表x.x-x」之後的文字
+    var caps = [], cm, re = /表\s*\d+(?:[.\-]\d+)+/g;
+    while ((cm = re.exec(t))) caps.push(cm.index);
+    if (caps.length) t = t.slice(caps[caps.length - 1]);
     if (known.length) {
       var key = D().normStation(t), hits = [];
       known.forEach(function (k) { if (k.key.length >= 2 && key.indexOf(k.key) >= 0) hits.push(k); });
@@ -1029,9 +1101,12 @@
       if (known.length && s.length <= 20) { var w = bestKnown(s); if (w && w.sim >= 0.75) return w.name; }
       return null;
     }
-    s = s.slice(0, cut).replace(/[\s:：,，、\-–_()]+$/g, "").replace(/^[\s:：,，、\-–_()]+/g, "");
+    s = s.slice(0, cut).replace(/[\s:：,，、\-–_(]+$/g, "").replace(/^[\s:：,，、\-–_()]+/g, "");
+    // 括號成對保留（「示範一號井(上游)」）；只剩左括號時才去掉
+    if (/\(/.test(s) && !/\)/.test(s)) s = s.replace(/\($/, "");
     // 「115年第三季空氣品質…」：季別／年月不是測站
-    s = s.replace(RE_PERIOD_STRIP, "").replace(/^[\s:：,，、\-–_()]+|[\s:：,，、\-–_()]+$/g, "");
+    s = s.replace(RE_PERIOD_STRIP, "").replace(/^[\s:：,，、\-–_()]+|[\s:：,，、\-–_]+$/g, "");
+    if (/\(/.test(s) && !/\)/.test(s)) s = s.replace(/\($/, "");
     if (s.length < 2 || s.length > 24 || !D().hasCJK(s) || D().parseRocDate(s)) return null;
     if (known.length) {
       var b = bestKnown(s);

@@ -118,8 +118,8 @@
     it("PM10", "air", "PM10", "懸浮微粒", "ug/m3", ["PM10", "PM 10", "懸浮微粒"], ["PMio", "PMi0", "PMl0", "PM1o", "PMlo", "PMIO", "PM1O", "PM l0", "PM io"], [], { ci: true }),
     it("PM2.5", "air", "PM2.5", "細懸浮微粒", "ug/m3", ["PM2.5", "PM 2.5", "細懸浮微粒"], ["PM25", "PM2,5", "PM2.s", "PM2 5", "PM2,s", "PM 25", "PM2.", "PM2", "PM2,"], [], { ci: true }),
     it("TSP", "air", "TSP", "總懸浮微粒", "ug/m3", ["TSP", "總懸浮微粒"], ["T.S.P", "T.S.P."], [], { ci: true }),
-    it("H2S", "air", "H₂S", "硫化氫", "ppm", ["H2S", "硫化氫"], ["H,S", "HzS"], [], { ci: true }),
-    it("NH3", "air", "NH₃", "氨", "ppm", ["NH3", "氨氣", "氨"], ["NH,"], [], { ci: true, notAfter: /^\s*-\s*N/i }),
+    it("H2S", "air", "H₂S", "硫化氫", "ppm", ["H2S", "硫化氫"], ["H,S", "HzS", "硫化所", "硫化氮"], [], { ci: true }),
+    it("NH3", "air", "NH₃", "氨", "ppm", ["NH3", "氨氣", "氨"], ["NH,"], [], { ci: true, notAfter: /^\s*(-\s*N|氮|態氮)/i }),
     it("ODOR", "air", "臭氣", "臭氣（異味）", null, ["臭氣", "異味", "異味污染物", "異味污染", "臭氣強度", "臭度", "臭味", "臭氣濃度"], [], []),
     it("Pb", "metal", "Pb", "鉛", null, ["Pb", "鉛"], [], []),
     /* ---- 氣象 ---- */
@@ -143,7 +143,7 @@
     it("LVMAX", "vib", "Lvmax", "最大振動", "dB", ["Lvmax", "Lv max", "LVmax", "Lv,max", "最大振動", "振動最大值"], [], [], { ci: true }),
     /* ---- 水質 ---- */
     it("WT", "water", "水溫", "水溫", "℃", ["水溫"], [], []),
-    it("pH", "water", "pH", "氫離子濃度指數", null, ["pH", "氫離子濃度指數", "酸鹼值"], [], [], { ci: true }),
+    it("pH", "water", "pH", "氫離子濃度指數", null, ["pH", "氫離子濃度指數", "氫離子濃度", "氫離子", "酸鹼值"], ["握離子濃度指數", "握離子"], [], { ci: true }),
     it("DO", "water", "溶氧", "溶氧量", "mg/L", ["DO", "溶氧", "溶氧量", "溶解氧"], [], []),
     it("BOD", "water", "BOD", "生化需氧量", "mg/L", ["BOD", "BOD5", "生化需氧量"], [], [], { ci: true }),
     it("COD", "water", "COD", "化學需氧量", "mg/L", ["COD", "化學需氧量"], [], [], { ci: true }),
@@ -162,7 +162,14 @@
     it("Zn", "metal", "Zn", "鋅", "mg/L", ["Zn", "鋅"], [], []),
     it("Hg", "metal", "Hg", "汞", "mg/L", ["Hg", "汞"], [], [], { notAfter: /^\s*[\/／]\s*N?m/i }),   // 「Hg/m3」是 μg/m3 的 OCR 誤認
     it("As", "metal", "As", "砷", "mg/L", ["As", "砷"], [], []),
-    it("Ni", "metal", "Ni", "鎳", "mg/L", ["Ni", "鎳"], [], [])
+    it("Ni", "metal", "Ni", "鎳", "mg/L", ["Ni", "鎳"], [], []),
+    it("SO4", "water", "硫酸鹽", "硫酸鹽", "mg/L", ["SO4", "硫酸鹽", "硫酸根"], ["硫酸監"], [], { ci: true }),
+    it("Cl", "water", "氯鹽", "氯鹽（氯離子）", "mg/L", ["Cl", "氯鹽", "氯離子", "氯化物"], [], [], { ci: true }),
+    it("TDS", "water", "總溶解固體物", "總溶解固體物", "mg/L", ["TDS", "總溶解固體物", "總溶解固體", "溶解固體物"], ["總溶解回題物", "總溶解同體物"], [], { ci: true }),
+    it("TOC", "water", "總有機碳", "總有機碳", "mg/L", ["TOC", "總有機碳"], [], [], { ci: true }),
+    it("Mn", "metal", "錳", "錳", "mg/L", ["Mn", "錳"], [], [], { ci: true }),
+    it("Fe", "metal", "鐵", "鐵", "mg/L", ["Fe", "鐵"], [], [], { ci: true }),
+    it("GWL", "water", "水位", "水位", "m", ["水位", "地下水位"], [], [])
   ];
   var ITEM_BY_CODE = {};
   ITEMS.forEach(function (x) { ITEM_BY_CODE[x.code] = x; });
@@ -447,6 +454,9 @@
     if (/^(N\.?\s*D\.?|未檢出|低於偵測極限|<\s*MDL|<\s*偵測極限)(\s*[(<].*)?$/i.test(t)) {
       return { ok: true, value: "ND", num: null, cmp: "ND", nd: true, decimals: 0, mark: false };
     }
+    if (/^[“"'‘]?\s*[I1l|]\s*ND\.?$/i.test(t)) {
+      return { ok: true, value: "ND", num: null, cmp: "ND", nd: true, decimals: 0, mark: false };
+    }
     if (isFiller(t)) return res;
     if (/^\d{1,2}\s*[:;]\s*\d{2}/.test(t)) return res;                       // 時間 10:00
     if (/^\d{2,4}\s*[.\/\-年]\s*\d{1,2}\s*[.\/\-月]\s*\d{1,2}/.test(t)) return res; // 日期
@@ -662,13 +672,25 @@
     return v;
   }
 
+  var RE_SAMPLE_NAME = /樣[品品]名[稱称][\s.:：;；]{0,3}([^\s:：,，;；聯]+)/;
+  /** findSampleName(text) → 樣品名稱（地下水報告：「樣品名稱：甲乙民宅」）| null；需含中文 */
+  function findSampleName(text) {
+    var m = RE_SAMPLE_NAME.exec(normLight(text).replace(/：/g, ":"));
+    if (!m) return null;
+    var v = m[1].replace(/^[\-_.、(\[]+|[\-_.、)\]]+$/g, "");
+    return (v && hasCJK(v) && v.length <= 24) ? v : null;
+  }
+
   /* =====================================================================
    * NIEA 方法編號 → 項目
    * ===================================================================== */
   var METHOD_ITEMS = {
     A201: ["ODOR"], A416: ["SO2"], A417: ["NOx", "NO2"], A421: ["CO"], A420: ["O3"],
     A740: ["THC", "NMHC", "CH4"], A206: ["PM10"], A205: ["PM2.5"], A102: ["TSP"],
-    P201: ["LEQ"], P203: ["LEQ"], P204: ["LVD", "LVN"]
+    P201: ["LEQ"], P203: ["LEQ"], P204: ["LVD", "LVN"],
+    W217: ["WT"], W424: ["pH"], W455: ["DO"], W510: ["BOD"], W203: ["EC"], W433: ["H2S"], W436: ["NO3N"],
+    W437: ["NH3N"], W406: ["Cl"], W465: ["SO4"], W210: ["TDS"], W530: ["TOC"], W330: ["Hg"],
+    W311: ["Cd", "Pb", "Cr", "Cu", "Zn", "Mn", "Fe", "As"]
   };
   var RE_METHOD = /N\s*[I1l|]\s*[EB]\s*A\s*-?\s*([APW])\s*(\d{3})/i;
   /** findMethodItem(text) → {method, codes: [...], code: 唯一時之代碼 | null} | null */
@@ -691,7 +713,7 @@
     isTimeRange: isTimeRange, parseRocDate: parseRocDate, formatDate: formatDate,
     parsePeriod: parsePeriod, quarterOf: quarterOf, rocYear: rocYear, dateInPeriod: dateInPeriod,
     normStation: normStation, stationCore: stationCore, stationSim: stationSim,
-    findStationCapture: findStationCapture,
+    findStationCapture: findStationCapture, findSampleName: findSampleName,
     METHOD_ITEMS: METHOD_ITEMS, findMethodItem: findMethodItem
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -14,7 +14,7 @@
   var YF = root.YangFill = root.YangFill || {};
 
   var PIPELINE_VERSION = 3;          // 快取格式／辨識流程版本（變更時 +1 使舊快取失效）
-  var MAX_CONTEXT_LINES = 40;        // 每頁最多 OCR 幾列表格外文字
+  var MAX_CONTEXT_LINES = 90;        // 每頁最多 OCR 幾列表格外文字
   var MIN_INK = 12;                  // 儲存格內墨點少於此數視為空白
   var MAX_PAGE_PIXELS = 100e6;       // 單頁影像像素上限（600 dpi A3 約 70M）
 
@@ -173,12 +173,47 @@
         targets[i].conf = (typeof r.conf === "number") ? Math.round(r.conf) : null;
       }
     }
+    // 項目名稱格（最左欄）OCR 失敗時，單字在 300 dpi 下再讀一次（psm 10 / 7）；
+    // 只採用「整格完全等於詞庫項目名稱」的結果，不做猜測
+    function refineLabels(targets) {
+      var D = YF.dict;
+      if (!D || !D.findItems) return Promise.resolve();
+      var todo = targets.filter(function (x) {
+        var t = x.cell.text || "";
+        return t.length <= 6 && !D.findItems(t).length;
+      });
+      if (!todo.length) return Promise.resolve();
+      var jobs = [], idx = [];
+      todo.forEach(function (x) {
+        var ink = G.cellInk(bin, mask, x.cell.bbox, 3);
+        if (!ink || !ink.bbox || ink.count < MIN_INK) return;
+        var small = R.scaleBitmap(R.cropBitmap(bin, ink.bbox), 0.5);
+        var bytes = R.encodePBM(small, null, 8, null);
+        jobs.push({ bytes: bytes, psm: "10" }, { bytes: bytes, psm: "7" });
+        idx.push(x);
+      });
+      if (!jobs.length) return Promise.resolve();
+      return ocrBatch(jobs).then(function (res) {
+        var fixed = 0;
+        idx.forEach(function (x, i) {
+          for (var k = 0; k < 2; k++) {
+            var t = cleanOcrText((res[2 * i + k] || {}).text);
+            if (!t) continue;
+            var exact = D.findItems(t).some(function (h) { return !h.weak && h.len === t.length; });
+            if (exact) { x.cell.text = t; x.cell.refined = true; fixed++; break; }
+          }
+        });
+        doc.stats.refinedLabels = (doc.stats.refinedLabels || 0) + fixed;
+      });
+    }
     function ocrBatch(jobs) {
       return jobs.length ? YF.ocr.recognizeCells(jobs, prog) : Promise.resolve([]);
     }
     var firstCells = firstTargets.map(function (x) { return x.cell; });
     return ocrBatch(firstJobs).then(function (res1) {
       assign(firstCells, res1);
+      return refineLabels(firstTargets);
+    }).then(function () {
       doneBase += firstJobs.length;
       // 列標籤為時段（10:00 ~ 11:00）的單列＝逐時資料：填表只用最大/最小/日平均列，略過以加速
       var timeRows = {};
