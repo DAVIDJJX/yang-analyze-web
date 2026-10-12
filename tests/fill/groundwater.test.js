@@ -48,9 +48,9 @@ const WELL = "嘉義縣某鎮某路99號";     // 採樣地點（地址）
 const ROWS_A = [["水溫", "℃", "30.1", "NIEA W217.52A"], ["生化需氧量", "mg/L", "4.4", "NIEA W510.56B"], ["氨氮", "mg/L", "<0.05", "NIEA W437.52C"]];
 const ROWS_B = [["硫酸鹽", "mg/L", "24.5", "NIEA W465.50B"], ["鎘", "mg/L", "ND", "NIEA W311.54C"]];
 T.test("樣品名稱優先於採樣地點；同一樣品的其他頁面依採樣時間連結", () => {
-  const p1 = reportPage(1, ["樣品名稱: 示範村", "採樣地點: " + WELL, "樣品編號: IJ115U0996-001", "採樣時間: 115.09.15 09:07~ 09:33"], ROWS_A);
+  const p1 = reportPage(1, ["樣品名稱: 示範村", "採樣地點: " + WELL, "樣品編號: AB115U0996-001", "採樣時間: 115.09.15 09:07~ 09:33"], ROWS_A);
   // 第 2 頁：樣品編號 OCR 有一字誤讀，名稱缺漏，但採樣時間相同
-  const p2 = reportPage(2, ["採樣地點: " + WELL, "樣品編號: 1UJ119U0996-001", "採樣時間: 115.09.15 09:07~ 09:33"], ROWS_B);
+  const p2 = reportPage(2, ["採樣地點: " + WELL, "樣品編號: 1BA119U0996-001", "採樣時間: 115.09.15 09:07~ 09:33"], ROWS_B);
   const d = H.doc("gw", [p1, p2], "raw", "gw.xdw");
   const tpl = H.doc("tpl", [H.grid("tt0", [["監測項目", "水溫", "硫酸鹽", "氨氮"], ["115年第三季", "", "", ""]], { page: null })], "template", "tpl.docx");
   tpl.tables[0].title = "表2.6-1 示範村(下游)地下水質監測歷次調查結果彙整(3/3)";
@@ -63,7 +63,7 @@ T.test("樣品名稱優先於採樣地點；同一樣品的其他頁面依採樣
   assert.ok(!f.some((x) => x.station && /某路|99號/.test(x.station)), "地址不作為測站");
 });
 T.test("亂碼樣品名稱不連結；無法判定者保留為待對應（樣品為單位）", () => {
-  const p1 = reportPage(1, ["樣品名稱: GK PR", "樣品編號: IJ115U0990-001", "採樣時間: 115.09.14 09:09~ 10:18"], ROWS_A);
+  const p1 = reportPage(1, ["樣品名稱: GK PR", "樣品編號: AB115U0990-001", "採樣時間: 115.09.14 09:09~ 10:18"], ROWS_A);
   const d = H.doc("gw2", [p1], "raw", "gw2.xdw");
   const f = X.facts(d, { stations: ["示範村(下游)"] });
   assert.ok(f.length > 0);
