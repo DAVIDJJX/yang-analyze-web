@@ -6,10 +6,9 @@ rem 網址：http://localhost:8788/   測試頁：http://localhost:8788/tests/
 rem 關閉此視窗即停止伺服器。
 rem =====================================================================
 chcp 65001 >nul
-cd /d "%~dp0"
 echo ============================================================
 echo  Yang-analyze web 本機啟動器
-echo  網址：http://localhost:8788/
+echo  網址請看下方視窗顯示的位址
 echo  關閉此視窗即停止伺服器。
 echo ============================================================
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0serve.ps1"

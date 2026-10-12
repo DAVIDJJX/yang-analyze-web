@@ -23,6 +23,7 @@ $mime = @{
 # 先試 localhost，不行再試 127.0.0.1（部分電腦對 localhost 有權限限制）
 $listener = $null
 $address = $null
+$lastErr = ''
 foreach ($h in @('localhost', '127.0.0.1')) {
   try {
     $l = New-Object System.Net.HttpListener
@@ -32,11 +33,13 @@ foreach ($h in @('localhost', '127.0.0.1')) {
     $address = "http://${h}:$Port/"
     break
   } catch {
+    $lastErr = $_.Exception.Message
     try { $l.Close() } catch {}
   }
 }
 if (-not $listener) {
   Write-Host "無法在連接埠 $Port 啟動伺服器。請關閉其他已開啟的 Yang-analyze web 視窗後再試。"
+  Write-Host ("系統訊息：" + $lastErr)
   exit 2
 }
 
@@ -45,16 +48,34 @@ Write-Host "填表核對測試頁：${address}tests/"
 Write-Host "關閉此視窗即停止伺服器。"
 try { Start-Process $address } catch { Write-Host "請手動用瀏覽器開啟 $address" }
 
+# 逐層檢查路徑是否經過符號連結或接合點（junction），避免跳出網站資料夾讀取外部檔案
+# 只用 LinkType 判斷，不把 OneDrive 等雲端同步的佔位檔誤判為連結
+function Test-ReparseChain([string]$p) {
+  $d = $p
+  while ($d.Length -gt $rootPrefix.Length) {
+    $lt = (Get-Item -LiteralPath $d -Force).LinkType
+    if ($lt -eq 'SymbolicLink' -or $lt -eq 'Junction') { return $true }
+    $d = [IO.Path]::GetDirectoryName($d)
+  }
+  return $false
+}
+
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   $res = $ctx.Response
   try {
     $urlPath = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath)
     if ($urlPath.EndsWith('/')) { $urlPath = $urlPath + 'index.html' }
-    $rel = $urlPath.TrimStart('/').Replace('/', [IO.Path]::DirectorySeparatorChar)
-    $full = [IO.Path]::GetFullPath((Join-Path $root $rel))
-    $inside = $full.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)
-    if ($inside -and (Test-Path -LiteralPath $full -PathType Leaf)) {
+    $inside = $false
+    $rel = ''
+    $full = ''
+    try {
+      $rel = $urlPath.TrimStart('/').Replace('/', [IO.Path]::DirectorySeparatorChar)
+      $full = [IO.Path]::GetFullPath((Join-Path $root $rel))
+      $inside = $full.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)
+    } catch { $inside = $false }
+    # 拒絕隱藏檔與資料夾（例如 .git），以及經由符號連結／接合點指向外部的路徑
+    if ($inside -and ($rel -notmatch '(^|[\\/])\.') -and (Test-Path -LiteralPath $full -PathType Leaf) -and -not (Test-ReparseChain $full)) {
       $bytes = [IO.File]::ReadAllBytes($full)
       $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
       $ct = $mime[$ext]
@@ -63,12 +84,12 @@ while ($listener.IsListening) {
       $res.ContentType = $ct
       $res.Headers['Cache-Control'] = 'no-cache'
       $res.ContentLength64 = $bytes.Length
-      $res.OutputStream.Write($bytes, 0, $bytes.Length)
+      if ($ctx.Request.HttpMethod -ne 'HEAD') { $res.OutputStream.Write($bytes, 0, $bytes.Length) }
     } else {
       $res.StatusCode = 404
       $msg = [Text.Encoding]::UTF8.GetBytes('404 Not Found')
       $res.ContentLength64 = $msg.Length
-      $res.OutputStream.Write($msg, 0, $msg.Length)
+      if ($ctx.Request.HttpMethod -ne 'HEAD') { $res.OutputStream.Write($msg, 0, $msg.Length) }
     }
   } catch {
     try { $res.StatusCode = 500 } catch {}
